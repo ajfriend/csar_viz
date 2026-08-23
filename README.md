@@ -118,6 +118,12 @@ gnomonic projection onto the tangent plane at `b`. Therefore
 
 ## Display
 
+The "convex hull of the points" toggle fills the geodesic convex hull of the
+input as a spherical polygon — the cell the cone is enclosing. Because the
+gnomonic projection sends great circles to straight lines, the planar hull of
+the projected points is exactly the geodesic hull on the sphere, so it is
+computed with an ordinary 2D monotone chain and mapped back.
+
 The "gnomonic plane" toggle draws the tangent plane at `b`, the projected points,
 and the cross-section ellipse — whose axis ratio *is* the CSAR. Note the cone rim
 and that ellipse are the same curve, and its centre sits exactly on the tangency
