@@ -124,6 +124,13 @@ gnomonic projection sends great circles to straight lines, the planar hull of
 the projected points is exactly the geodesic hull on the sphere, so it is
 computed with an ordinary 2D monotone chain and mapped back.
 
+The cap is tessellated in both directions — along each edge AND radially from
+the centre — because subdividing only the edges leaves long thin triangles
+running centre-to-rim that chord straight through the sphere, so a large cap
+visibly sags. Both subdivision counts are chosen from the polygon's angular
+extent against a triangle budget, so small caps stay cheap (~0.1 ms) and a
+near-hemisphere one stays smooth (~0.9 ms).
+
 The "gnomonic plane" toggle draws the tangent plane at `b`, the projected points,
 and the cross-section ellipse — whose axis ratio *is* the CSAR. Note the cone rim
 and that ellipse are the same curve, and its centre sits exactly on the tangency
