@@ -490,45 +490,110 @@ function hullOnSphere(S) {
 function drawHull(S) {
   const h = hullOnSphere(S);
   if (!h) return;
-  const R = 1.004;                          // lift clear of the sphere wireframe
+  const R = 1.004;                       // lift clear of the sphere wireframe
   const c = nz(h.reduce((a, v) => add(a, v), V(0, 0, 0)));
   const ang = (u, v) => Math.acos(Math.max(-1, Math.min(1, dot(u, v))));
 
-  // Subdividing only along the edges leaves long thin triangles running from the
-  // centre to the rim, and those chord straight through the sphere — a big cap
-  // visibly sags. Tessellate radially as well, sizing both directions by angular
-  // extent so small caps stay cheap and large ones stay smooth.
+  // Subdivision is sized in SCREEN space, not by a fixed angle: how coarse a
+  // facet looks depends on zoom, so aim for a target edge length in pixels. A
+  // sphere arc of theta subtends roughly focal*theta/dist pixels.
+  // Since each band is a single fill, interior tessellation is invisible: only
+  // the OUTER edge resolution shows. So subdivide finely along the boundary
+  // (screen-space) and coarsely in the radial direction.
+  const TARGET_PX = 11, MAX_TRIS = 3000;
   let far = 0;
   for (const v of h) far = Math.max(far, ang(c, v));
-  let step = 0.10;                          // radians per subdivision (~6°)
-  const budget = 1800;                      // triangle cap, keeps the depth sort sane
-  for (;;) {
-    const M = Math.max(1, Math.ceil(far / step));
-    let tris = 0;
+  let step = Math.max(0.012, TARGET_PX * cam.dist / focal);
+  const M = Math.max(2, Math.min(8, Math.ceil(far / 0.35)));   // radial rings
+  for (;;) {                             // back off until inside the budget
+    let t = 0;
     for (let i = 0; i < h.length; i++)
-      tris += Math.max(1, Math.ceil(ang(h[i], h[(i + 1) % h.length]) / step)) * (2 * M - 1);
-    if (tris <= budget || step > 1.5) break;
-    step *= 1.3;
+      t += Math.max(1, Math.ceil(ang(h[i], h[(i + 1) % h.length]) / step)) * 2 * M;
+    if (t <= MAX_TRIS || step > 1.0) break;
+    step *= 1.25;
   }
-  const M = Math.max(1, Math.ceil(far / step));
-  const FILL = 'rgba(124,92,214,0.20)', EDGE = 'rgba(104,70,198,0.85)';
-  // ring j of the sector, at parameter t along the edge arc
-  const P = (a, b, t, j) => scl(nz(add(scl(c, 1 - j / M), scl(nz(add(scl(a, 1 - t), scl(b, t))), j / M))), R);
+
+  // Adjacent translucent triangles filled separately leave antialiasing seams —
+  // the mesh shows through as a web of hairlines. Collect them into a handful of
+  // depth bands and fill each band as ONE compound path: a single fill has no
+  // interior edges, so the surface reads as continuous. Banding keeps enough
+  // depth resolution for the painter's sort without one primitive per facet.
+  const BANDS = 14;
+  const bands = Array.from({ length: BANDS }, () => []);
+  let lo = Infinity, hi = -Infinity;
+  const tris = [];
+  const cP = scl(c, R);
 
   for (let e = 0; e < h.length; e++) {
-    const a = h[e], b = h[(e + 1) % h.length];
-    const K = Math.max(1, Math.ceil(ang(a, b) / step));
-    for (let i = 0; i < K; i++) {
-      const t0 = i / K, t1 = (i + 1) / K;
-      pushPoly([scl(c, R), P(a, b, t0, 1), P(a, b, t1, 1)], FILL, null, 0);   // innermost fan
-      for (let j = 1; j < M; j++) {
-        const q00 = P(a, b, t0, j), q10 = P(a, b, t1, j),
-              q01 = P(a, b, t0, j + 1), q11 = P(a, b, t1, j + 1);
-        pushPoly([q00, q10, q11], FILL, null, 0);
-        pushPoly([q00, q11, q01], FILL, null, 0);
-      }
-      pushLine(P(a, b, t0, M), P(a, b, t1, M), EDGE, 2);                      // rim
+    const a = h[e], b2 = h[(e + 1) % h.length];
+    const K = Math.max(1, Math.ceil(ang(a, b2) / step));
+    // project the sector grid once; triangles reference it
+    const g = [];
+    for (let i = 0; i <= K; i++) {
+      const t = i / K, arc = nz(add(scl(a, 1 - t), scl(b2, t)));
+      const col = [];
+      for (let j = 0; j <= M; j++)
+        col.push(project(scl(nz(add(scl(c, 1 - j / M), scl(arc, j / M))), R)));
+      g.push(col);
     }
+    for (let i = 0; i < K; i++) for (let j = 0; j < M; j++) {
+      const q00 = g[i][j], q10 = g[i + 1][j], q01 = g[i][j + 1], q11 = g[i + 1][j + 1];
+      if (!q00 || !q10 || !q01 || !q11) continue;
+      if (j === 0) tris.push([q00, q11, q01, (q00.z + q11.z + q01.z) / 3]);
+      else {
+        tris.push([q00, q10, q11, (q00.z + q10.z + q11.z) / 3]);
+        tris.push([q00, q11, q01, (q00.z + q11.z + q01.z) / 3]);
+      }
+    }
+  }
+  for (const t of tris) { lo = Math.min(lo, t[3]); hi = Math.max(hi, t[3]); }
+  if (!tris.length) return;
+  const span = Math.max(hi - lo, 1e-9);
+  for (const t of tris) bands[Math.min(BANDS - 1, Math.floor((t[3] - lo) / span * BANDS))].push(t);
+
+  bands.forEach((bt, k) => {
+    if (!bt.length) return;
+    let z = 0;
+    for (const t of bt) z += t[3];
+    z /= bt.length;
+    prims.push({ z, f: () => {
+      ctx.fillStyle = 'rgba(124,92,214,0.20)';
+      ctx.beginPath();
+      for (const t of bt) {
+        ctx.moveTo(t[0].x, t[0].y); ctx.lineTo(t[1].x, t[1].y); ctx.lineTo(t[2].x, t[2].y);
+        ctx.closePath();
+      }
+      ctx.fill();
+    } });
+  });
+
+  // rim, chunked so it keeps some depth resolution without one prim per segment
+  const rim = [];
+  for (let e = 0; e < h.length; e++) {
+    const a = h[e], b2 = h[(e + 1) % h.length];
+    const K = Math.max(1, Math.ceil(ang(a, b2) / step));
+    for (let i = 0; i < K; i++) rim.push(scl(nz(add(scl(a, 1 - i / K), scl(b2, i / K))), R));
+  }
+  rim.push(rim[0]);
+  const CH = 16;
+  for (let i = 0; i + 1 < rim.length; i += CH) {
+    const q = [];
+    let ok = true;
+    for (let k = i; k <= Math.min(i + CH, rim.length - 1); k++) {
+      const pr = project(rim[k]);
+      if (!pr) { ok = false; break; }
+      q.push(pr);
+    }
+    if (!ok || q.length < 2) continue;
+    let z = 0;
+    for (const pr of q) z += pr.z;
+    z /= q.length;
+    prims.push({ z, f: () => {
+      ctx.strokeStyle = 'rgba(104,70,198,0.85)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(q[0].x, q[0].y);
+      for (let k = 1; k < q.length; k++) ctx.lineTo(q[k].x, q[k].y);
+      ctx.stroke();
+    } });
   }
 }
 

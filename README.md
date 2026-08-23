@@ -137,9 +137,15 @@ computed with an ordinary 2D monotone chain and mapped back.
 The cap is tessellated in both directions — along each edge AND radially from
 the centre — because subdividing only the edges leaves long thin triangles
 running centre-to-rim that chord straight through the sphere, so a large cap
-visibly sags. Both subdivision counts are chosen from the polygon's angular
-extent against a triangle budget, so small caps stay cheap (~0.1 ms) and a
-near-hemisphere one stays smooth (~0.9 ms).
+visibly sags.
+
+Triangles are grouped into depth bands and each band is filled as ONE compound
+path. Filling adjacent translucent triangles separately leaves antialiasing
+seams, so the mesh shows through as a web of hairlines; a single fill has no
+interior edges. That also means interior mesh density is invisible, so the
+along-edge subdivision is sized in SCREEN space (a target edge length in pixels,
+which accounts for zoom) while the radial direction stays coarse. Cost is ~0.4 ms
+for a normal cap and ~1 ms for a zoomed-in near-hemisphere one.
 
 The "coastlines" toggle draws Natural Earth's 110m coastline on the globe,
 which makes the sphere's orientation legible and puts the DGGS use case in
