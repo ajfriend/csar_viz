@@ -535,7 +535,7 @@ function draw() {
     if (ui('cRays').checked) for (const x of X)
       pushLine(V(0,0,0), scl(x, 1 / Math.max(dot(sol.b, x), 1e-6)), 'rgba(90,104,128,0.28)', 1);
     // axis b
-    const tip = scl(sol.b, ui('cGno').checked ? 1.0 : 1.22);
+    const tip = sol.b;                                   // unit length: b is already normalised
     pushLine(V(0, 0, 0), tip, '#3b6fd4', 2.4);
     const [a1, a2] = frameOf(sol.b), back = scl(sol.b, -0.046), rad = 0.016;
     for (let k = 0; k < 12; k++) {                       // arrowhead
