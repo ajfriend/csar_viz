@@ -579,7 +579,15 @@ function draw() {
     if (ui('cRays').checked) for (const x of X)
       pushLine(V(0,0,0), scl(x, 1 / Math.max(dot(sol.b, x), 1e-6)), 'rgba(90,104,128,0.28)', 1);
     // axis b
-    pushLine(V(0, 0, 0), scl(sol.b, ui('cGno').checked ? 1.0 : 1.22), '#3b6fd4', 2.4);
+    const tip = scl(sol.b, ui('cGno').checked ? 1.0 : 1.22);
+    pushLine(V(0, 0, 0), tip, '#3b6fd4', 2.4);
+    const [a1, a2] = frameOf(sol.b), back = scl(sol.b, -0.046), rad = 0.016;
+    for (let k = 0; k < 12; k++) {                       // arrowhead
+      const t0 = 2*Math.PI*k/12, t1 = 2*Math.PI*(k+1)/12;
+      const r0 = add(add(tip, back), add(scl(a1, rad*Math.cos(t0)), scl(a2, rad*Math.sin(t0))));
+      const r1 = add(add(tip, back), add(scl(a1, rad*Math.cos(t1)), scl(a2, rad*Math.sin(t1))));
+      pushPoly([tip, r0, r1], 'rgba(59,111,212,0.95)', null, 0);
+    }
   }
 
   for (let i = 0; i < X.length; i++) {
