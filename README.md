@@ -131,6 +131,13 @@ visibly sags. Both subdivision counts are chosen from the polygon's angular
 extent against a triangle budget, so small caps stay cheap (~0.1 ms) and a
 near-hemisphere one stays smooth (~0.9 ms).
 
+The "coastlines" toggle draws Natural Earth's 110m coastline on the globe,
+which makes the sphere's orientation legible and puts the DGGS use case in
+view. The data is embedded, not fetched: quantised to 0.1 degrees and delta
+encoded, 133 rings / 5119 points / ~27 KB, so the page stays a single file that
+opens from `file://`. Natural Earth is public domain; the same source
+`csar_zig/scripts/gen_countries.py` uses.
+
 The "gnomonic plane" toggle draws the tangent plane at `b`, the projected points,
 and the cross-section ellipse — whose axis ratio *is* the CSAR. Note the cone rim
 and that ellipse are the same curve, and its centre sits exactly on the tangency
