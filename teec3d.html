@@ -456,11 +456,11 @@ function sphereWire() {
     const t = Math.min(1, Math.max(0, (cam.dist + 1 - z) / 2));   // 1 near, 0 far
     return `rgba(88,104,128,${(0.10 + 0.24 * t).toFixed(3)})`;
   };
-  // Standard graticule: one interval for both families. Meridians every 15°,
-  // parallels every 15° from 75°S to 75°N, and the meridians stop at ±80° so
-  // they reach just past the last parallel instead of collapsing into an ink
-  // blot at the pole — the way a printed globe is drawn.
-  const D = Math.PI / 180, STEP = 15, POLE = 80;
+  // Standard graticule: one interval for both families, every 15°. Meridians
+  // terminate exactly on the outermost parallel (±75°) rather than overshooting
+  // it or running to the pole, so the grid closes cleanly and no line dangles
+  // past the last circle.
+  const D = Math.PI / 180, STEP = 15, POLE = 90 - STEP;
   for (let lon = 0; lon < 360; lon += STEP) {          // meridians
     const a = lon * D;
     let prev = null;
