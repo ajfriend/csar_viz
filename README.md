@@ -85,7 +85,17 @@ support set (the points that end up on the cone boundary).
 
 ## How it solves it in the browser
 
-No SDP solver. The problem collapses for a fixed axis `b` — see the derivation in
+It runs **csar itself**, compiled to `wasm32-freestanding` and inlined as
+base64 (`csar_wasm/src/shim.zig`). The page stays a single file that opens from
+`file://`, there is no second implementation of the algorithm to keep in step,
+and the panel can report the *certified duality gap* instead of asserting a
+number. Rank-deficient input is reported as such rather than silently answered.
+
+The page previously carried its own JavaScript solver. What that solver did,
+and why it is the same algorithm, is kept below because it explains the picture
+the page draws — the gnomonic plane, the cross-section ellipse, the support set.
+
+No SDP solver is needed. The problem collapses for a fixed axis `b` — see the derivation in
 the "Why some b give the empty set" section above for the change of variables, and:
 
     G = A^2 in the frame (f1, f2, b), complete the square
