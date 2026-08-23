@@ -620,6 +620,21 @@ function readout() {
 
 /* =======================  interaction  ======================= */
 let mode = null, dragIdx = -1, last = null;
+
+// Input can outpace the display, and work done between two frames is never
+// seen. Fold it: state updates stay synchronous, the expensive tail runs once
+// per frame. A queued solve outranks a queued draw, since recompute() draws.
+let rafId = 0, queued = null;
+function schedule(kind) {
+  if (kind === 'solve' || queued === null) queued = kind;
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => {
+    rafId = 0;
+    const k = queued;
+    queued = null;
+    if (k === 'solve') recompute(); else draw();
+  });
+}
 function pickPoint(px, py) {
   let best = -1, bz = Infinity;
   for (let i = 0; i < X.length; i++) {
@@ -642,10 +657,10 @@ cv.addEventListener('pointermove', e => {
     cam.az -= (px - last.x) * 0.008;
     cam.el = Math.max(-1.45, Math.min(1.45, cam.el + (py - last.y) * 0.008));
     last = { x: px, y: py };
-    draw();
+    schedule('draw');
   } else if (mode === 'pt') {
     X[dragIdx] = hitSphere(px, py);
-    recompute();
+    schedule('solve');
   } else {
     cv.style.cursor = pickPoint(px, py) >= 0 ? 'pointer' : 'grab';
   }
@@ -661,7 +676,7 @@ cv.addEventListener('dblclick', e => {
 cv.addEventListener('wheel', e => {
   e.preventDefault();
   cam.dist = Math.min(14, Math.max(1.8, cam.dist * Math.exp(e.deltaY * 0.0012)));
-  draw();
+  schedule('draw');
 }, { passive: false });
 
 for (const btn of document.querySelectorAll('[data-preset]'))
