@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEEC — tightest enclosing ellipsoidal cone in 3D</title>
+<style>
+  :root {
+    --bg: #0c0f14; --panel: #141920; --line: #252c38; --fg: #dde3ec; --dim: #8b96a8;
+    --accent: #6ee7d0; --cone: #6ee7d0; --bvec: #7aa2ff; --pt: #94a3bd; --active: #ffb454;
+    --bad: #ff6b6b; --good: #7ee787;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); display: flex; overflow: hidden;
+    font: 13px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; }
+  #stage { flex: 1 1 auto; position: relative; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  #hint { position: absolute; left: 14px; bottom: 12px; color: var(--dim); font-size: 11.5px;
+    pointer-events: none; }
+  #back { position: absolute; right: 14px; top: 12px; color: var(--dim); font-size: 11.5px;
+    text-decoration: none; }
+  #back:hover { color: var(--accent); }
+  aside { width: 340px; flex: 0 0 340px; background: var(--panel); border-left: 1px solid var(--line);
+    padding: 18px 18px 28px; overflow-y: auto; height: 100%; }
+  h1 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--dim); font-size: 11.5px; margin: 0 0 16px; }
+  h2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim);
+    margin: 20px 0 8px; font-weight: 600; }
+  .row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+  .row .k { color: var(--dim); }
+  .row .v, .mat { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+  .row .v.big { font-size: 15px; color: var(--accent); }
+  .mat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 10px; background: #0f131a;
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; text-align: right; margin-top: 4px; }
+  label.ck { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; font-size: 12.5px; }
+  input[type=checkbox] { accent-color: var(--accent); }
+  .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  button { background: #1b232e; color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  button:hover { background: #232f3d; border-color: #3a4658; }
+  .status { padding: 8px 10px; border-radius: 6px; font-size: 12px; margin-top: 6px; }
+  .status.ok { background: rgba(126,231,135,.09); color: var(--good); border: 1px solid rgba(126,231,135,.25); }
+  .status.no { background: rgba(255,107,107,.09); color: var(--bad); border: 1px solid rgba(255,107,107,.25); }
+  .note { color: var(--dim); font-size: 11.5px; margin-top: 10px; }
+  code { font-family: ui-monospace, Menlo, monospace; }
+  .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: 1px; }
+  @media (max-width: 860px) { body { flex-direction: column; overflow: auto; }
+    #stage { height: 60vh; flex: none; } aside { width: 100%; flex: none; height: auto; border: none; } }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <a id="back" href="index.html">← 2D playground</a>
+  <div id="hint">drag to orbit · scroll to zoom · drag a point to move it on the sphere · shift-click the sphere to add · double-click a point to delete</div>
+</div>
+
+<aside>
+  <h1>TEEC <span>tightest enclosing ellipsoidal cone</span></h1>
+  <p class="sub">minimize −log det A &nbsp;s.t.&nbsp; ‖A xᵢ‖₂ ≤ bᵀxᵢ, ‖b‖₂ ≤ 1</p>
+
+  <div id="feas" class="status"></div>
+
+  <h2>Solution</h2>
+  <div class="row"><span class="k">CSAR σ₂/σ₁</span><span class="v big" id="csar"></span></div>
+  <div class="row"><span class="k">σ₀ (along b)</span><span class="v" id="s0"></span></div>
+  <div class="row"><span class="k">σ₁, σ₂</span><span class="v" id="s12"></span></div>
+  <div class="row"><span class="k">−log det A</span><span class="v" id="ld"></span></div>
+  <div class="row"><span class="k">b</span><span class="v" id="bv"></span></div>
+  <div class="row"><span class="k">half-angle (round frame)</span><span class="v" id="ha"></span></div>
+
+  <h2>A</h2>
+  <div class="mat" id="Amat"></div>
+
+  <h2>Solver</h2>
+  <div class="row"><span class="k">points n</span><span class="v" id="np"></span></div>
+  <div class="row"><span class="k">on the boundary</span><span class="v" id="nact"></span></div>
+  <div class="row"><span class="k">outer iterations</span><span class="v" id="iters"></span></div>
+  <div class="row"><span class="k">‖v‖ (axis residual)</span><span class="v" id="resid"></span></div>
+  <div class="row"><span class="k">max ‖Axᵢ‖ − bᵀxᵢ</span><span class="v" id="prim"></span></div>
+
+  <h2>Points</h2>
+  <div class="btns">
+    <button data-preset="strip">elongated</button>
+    <button data-preset="quad">quad</button>
+    <button data-preset="cap">round cap</button>
+    <button data-preset="rand">random</button>
+  </div>
+  <div class="btns"><button id="addPt">+ point</button><button id="resetCam">reset view</button></div>
+
+  <h2>Display</h2>
+  <label class="ck"><input type="checkbox" id="cSphere" checked> unit sphere</label>
+  <label class="ck"><input type="checkbox" id="cGno"> gnomonic plane bᵀx = 1 + cross-section</label>
+  <label class="ck"><input type="checkbox" id="cRays"> projection rays</label>
+  <label class="ck"><input type="checkbox" id="cAxes" checked> coordinate axes</label>
+
+  <h2>Legend</h2>
+  <div class="note">
+    <span class="sw" style="background:var(--cone)"></span>cone C(A, b) and its rim on the sphere<br>
+    <span class="sw" style="background:var(--active)"></span>points on the cone boundary (the support set)<br>
+    <span class="sw" style="background:var(--pt)"></span>points strictly inside<br>
+    <span class="sw" style="background:var(--bvec)"></span>optimal axis b
+  </div>
+  <p class="note">For a fixed b the problem is exactly the 2D minimum-area enclosing
+  ellipse of the gnomonic projection onto the tangent plane at b; the outer solve moves b
+  until that ellipse is centred on the tangency point. At the optimum b is an eigenvector
+  of A with σ₀ = 1/√3 ≈ 0.5774 — the panel shows it as a check, it is never imposed.</p>
+</aside>
+
+<script>
+(() => {
+'use strict';
+
+/* =======================  linear algebra  ======================= */
+const V = (x, y, z) => ({ x, y, z });
+const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+const add = (a, b) => V(a.x + b.x, a.y + b.y, a.z + b.z);
+const sub = (a, b) => V(a.x - b.x, a.y - b.y, a.z - b.z);
+const scl = (a, s) => V(a.x * s, a.y * s, a.z * s);
+const cross = (a, b) => V(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+const len = a => Math.sqrt(dot(a, a));
+const nz = a => scl(a, 1 / (len(a) || 1));
+const mv = (M, x) => V(M[0]*x.x + M[1]*x.y + M[2]*x.z,
+                       M[3]*x.x + M[4]*x.y + M[5]*x.z,
+                       M[6]*x.x + M[7]*x.y + M[8]*x.z);
+function inv3(M) {
+  const [a,b,c,d,e,f,g,h,i] = M;
+  const A = e*i - f*h, B = -(d*i - f*g), C = d*h - e*g, det = a*A + b*B + c*C;
+  if (Math.abs(det) < 1e-18) return null;
+  return [A/det, (c*h - b*i)/det, (b*f - c*e)/det,
+          B/det, (a*i - c*g)/det, (c*d - a*f)/det,
+          C/det, (b*g - a*h)/det, (a*e - b*d)/det];
+}
+const det3 = M => M[0]*(M[4]*M[8] - M[5]*M[7]) - M[1]*(M[3]*M[8] - M[5]*M[6]) + M[2]*(M[3]*M[7] - M[4]*M[6]);
+// Jacobi eigendecomposition of a symmetric 3x3; eigenvectors are the columns of vecs.
+function jacobi(Ain) {
+  let a = Ain.slice(), v = [1,0,0, 0,1,0, 0,0,1];
+  for (let sw = 0; sw < 32; sw++) {
+    if (a[1]*a[1] + a[2]*a[2] + a[5]*a[5] < 1e-26) break;
+    for (const [p, q] of [[0,1],[0,2],[1,2]]) {
+      const apq = a[p*3+q]; if (Math.abs(apq) < 1e-20) continue;
+      const th = (a[q*3+q] - a[p*3+p]) / (2 * apq);
+      const t = (th >= 0 ? 1 : -1) / (Math.abs(th) + Math.sqrt(th*th + 1));
+      const c = 1 / Math.sqrt(t*t + 1), s = t * c;
+      for (let k = 0; k < 3; k++) { const kp = a[k*3+p], kq = a[k*3+q]; a[k*3+p] = c*kp - s*kq; a[k*3+q] = s*kp + c*kq; }
+      for (let k = 0; k < 3; k++) { const pk = a[p*3+k], qk = a[q*3+k]; a[p*3+k] = c*pk - s*qk; a[q*3+k] = s*pk + c*qk; }
+      for (let k = 0; k < 3; k++) { const kp = v[k*3+p], kq = v[k*3+q]; v[k*3+p] = c*kp - s*kq; v[k*3+q] = s*kp + c*kq; }
+    }
+  }
+  return { vals: [a[0], a[4], a[8]], vecs: v };
+}
+function sqrtm(M) {
+  const { vals, vecs: v } = jacobi(M), s = vals.map(x => Math.sqrt(Math.max(x, 0)));
+  const R = new Array(9).fill(0);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    let acc = 0; for (let k = 0; k < 3; k++) acc += v[r*3+k] * s[k] * v[c*3+k];
+    R[r*3+c] = acc;
+  }
+  return R;
+}
+
+/* =======================  the solver  =======================
+   For a fixed unit b, write G = A² in the frame (f1, f2, b). Completing the
+   square turns ‖A xᵢ‖ ≤ bᵀxᵢ into (uᵢ−v)ᵀH(uᵢ−v) ≤ 1 for the gnomonic
+   projection uᵢ, and det G = τ²(1−τ)·det H separates: τ = 2/3, and H is the
+   ordinary free-centre MVEE.  So the inner problem is a 2D min-area enclosing
+   ellipse, and the outer problem moves b until that ellipse is centred (v = 0).
+   ============================================================== */
+
+// Minimum-area enclosing ellipse of 2D points: { u : (u−c)ᵀH(u−c) ≤ 1 }.
+// Wolfe–Atwood: Frank–Wolfe with away steps on max log det(Σ wᵢ qᵢqᵢᵀ), qᵢ = (uᵢ, 1).
+// Optimality: gᵢ = qᵢᵀM⁻¹qᵢ ≤ m = 3, with equality wherever wᵢ > 0.
+function mvee2(P, tol = 1e-12, maxit = 1500) {
+  const n = P.length; if (n < 3) return null;
+  const m = 3, q = P.map(p => [p.x, p.y, 1]);
+  let w = new Array(n).fill(1 / n), it = 0;
+  const M = new Array(9), g = new Array(n);
+  for (; it < maxit; it++) {
+    M.fill(0);
+    for (let i = 0; i < n; i++) { const Q = q[i], wi = w[i]; if (wi === 0) continue;
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) M[r*3+c] += wi * Q[r] * Q[c]; }
+    const Mi = inv3(M); if (!Mi) return null;
+    let hi = -Infinity, jh = 0, lo = Infinity, jl = 0;
+    for (let i = 0; i < n; i++) {
+      const Q = q[i]; let sm = 0;
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) sm += Q[r] * Mi[r*3+c] * Q[c];
+      g[i] = sm;
+      if (sm > hi) { hi = sm; jh = i; }
+      if (w[i] > 1e-14 && sm < lo) { lo = sm; jl = i; }
+    }
+    const epsP = hi / m - 1, epsM = 1 - lo / m;
+    if (Math.max(epsP, epsM) <= tol) break;
+    let j, lam;
+    if (epsP >= epsM) { j = jh; lam = (g[j] - m) / (m * (g[j] - 1)); }         // add step
+    else { j = jl; lam = (g[j] - m) / (m * (g[j] - 1));                        // away step
+           lam = Math.max(lam, -w[j] / (1 - w[j])); }
+    for (let i = 0; i < n; i++) w[i] *= (1 - lam);
+    w[j] += lam;
+    if (w[j] < 1e-15) w[j] = 0;
+  }
+  let cx = 0, cy = 0, s11 = 0, s12 = 0, s22 = 0;
+  for (let i = 0; i < n; i++) { const p = P[i], wi = w[i];
+    cx += wi*p.x; cy += wi*p.y; s11 += wi*p.x*p.x; s12 += wi*p.x*p.y; s22 += wi*p.y*p.y; }
+  const c11 = s11 - cx*cx, c12 = s12 - cx*cy, c22 = s22 - cy*cy, det = c11*c22 - c12*c12;
+  if (!(det > 1e-16)) return null;                       // collinear -> zero-volume cone
+  let H = { a: c22/(2*det), b: -c12/(2*det), d: c11/(2*det) };   // H = ½·Cov⁻¹
+  // Safeguard: guarantee containment even if the iteration stopped short, so the
+  // reported cone is always primal feasible.
+  let mx = 0;
+  for (const p of P) { const dx = p.x - cx, dy = p.y - cy;
+    mx = Math.max(mx, dx*(H.a*dx + H.b*dy) + dy*(H.b*dx + H.d*dy)); }
+  if (mx > 1) H = { a: H.a/mx, b: H.b/mx, d: H.d/mx };
+  return { H, v: { x: cx, y: cy }, detH: H.a*H.d - H.b*H.b, it };
+}
+function frameOf(b) {
+  const t = Math.abs(b.z) < 0.9 ? V(0, 0, 1) : V(1, 0, 0);
+  const f1 = nz(cross(t, b));
+  return [f1, cross(b, f1)];
+}
+function innerAt(b, X) {
+  const [f1, f2] = frameOf(b), P = [];
+  for (const x of X) { const d = dot(b, x); if (d <= 1e-9) return null;
+    P.push({ x: dot(f1, x) / d, y: dot(f2, x) / d }); }
+  const m = mvee2(P); if (!m) return null;
+  return { ...m, f1, f2, P };
+}
+function solve(X, b0) {
+  if (X.length < 3) return { ok: false, why: 'need at least 3 points' };
+  // Feasibility. The points lie in an open half-space iff the origin is outside
+  // conv{xᵢ}; the min-norm point z* of that hull is the max-margin axis, since
+  // z*·x ≥ ‖z*‖² for every x in the hull. Gilbert / Frank–Wolfe:
+  let z = X[0];
+  for (let k = 0; k < 2000; k++) {
+    let mn = Infinity, arg = null;
+    for (const x of X) { const d = dot(z, x); if (d < mn) { mn = d; arg = x; } }
+    if (mn >= dot(z, z) - 1e-16) break;                   // optimal
+    const dv = sub(arg, z), dd = dot(dv, dv);
+    if (dd < 1e-300) break;
+    const t = Math.max(0, Math.min(1, -dot(z, dv) / dd));
+    if (t <= 0) break;
+    z = add(z, scl(dv, t));
+  }
+  if (!(Math.sqrt(dot(z, z)) > 1e-9))
+    return { ok: false, why: 'points are not contained in an open half-space — no enclosing cone exists' };
+  let b = nz(z);
+  if (b0 && dot(b0, b0) > 0.5) {                          // prefer a feasible warm start
+    let mn = Infinity;
+    for (const x of X) mn = Math.min(mn, dot(nz(b0), x));
+    if (mn > 1e-7) b = nz(b0);
+  }
+  let cur = innerAt(b, X);
+  if (!cur) return { ok: false, why: 'degenerate: the points are coplanar with the origin (zero-volume cone)' };
+  let outer = 0;
+  for (; outer < 200; outer++) {
+    if (Math.hypot(cur.v.x, cur.v.y) < 1e-10) break;
+    let moved = false;
+    // fixed point: re-aim b at the centre of the cross-section ellipse
+    const dir = nz(add(add(b, scl(cur.f1, cur.v.x)), scl(cur.f2, cur.v.y)));
+    for (let t = 1; t >= 1/64; t /= 2) {
+      const bn = nz(add(scl(b, 1 - t), scl(dir, t))), r = innerAt(bn, X);
+      if (r && r.detH > cur.detH * (1 + 1e-15)) { b = bn; cur = r; moved = true; break; }
+    }
+    if (moved) continue;
+    let h = Math.max(Math.hypot(cur.v.x, cur.v.y), 1e-3), lvl = 0;  // fallback: pattern search
+    while (h > 1e-11 && !moved && lvl++ < 10) {
+      for (const [s1, s2] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) {
+        const bn = nz(add(add(b, scl(cur.f1, s1*h)), scl(cur.f2, s2*h))), r = innerAt(bn, X);
+        if (r && r.detH > cur.detH * (1 + 1e-15)) { b = bn; cur = r; moved = true; break; }
+      }
+      if (!moved) h /= 3;
+    }
+    if (!moved) break;
+  }
+  // assemble A = G^{1/2} from the block form
+  const { H, v, f1, f2 } = cur, tau = 2/3;
+  const G11 = { a: tau*H.a, b: tau*H.b, d: tau*H.d };
+  const gx = -(G11.a*v.x + G11.b*v.y), gy = -(G11.b*v.x + G11.d*v.y);
+  const g33 = 1/3 + (v.x*(G11.a*v.x + G11.b*v.y) + v.y*(G11.b*v.x + G11.d*v.y));
+  const Gf = [G11.a, G11.b, gx,  G11.b, G11.d, gy,  gx, gy, g33];
+  const F  = [f1.x, f2.x, b.x,  f1.y, f2.y, b.y,  f1.z, f2.z, b.z];
+  const Gx = new Array(9).fill(0);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) { let s = 0;
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) s += F[r*3+i] * Gf[i*3+j] * F[c*3+j];
+    Gx[r*3+c] = s; }
+  const A = sqrtm(Gx), Ai = inv3(A);
+  const eig = jacobi(A);
+  // σ₀ is the eigenvalue whose eigenvector is b — NOT necessarily the smallest.
+  // Once the cone exceeds ~54.7° in some direction that semi-axis drops below
+  // 1/√3, so picking σ₀ by sorting mislabels it and corrupts the CSAR.
+  let al = -1, i0 = 0;
+  for (let i = 0; i < 3; i++) {
+    const a = Math.abs(eig.vecs[i] * b.x + eig.vecs[3+i] * b.y + eig.vecs[6+i] * b.z);
+    if (a > al) { al = a; i0 = i; }
+  }
+  const rest = [0, 1, 2].filter(i => i !== i0).sort((p, q) => eig.vals[p] - eig.vals[q]);
+  return { ok: true, b, A, Ai, H, v, f1, f2, P: cur.P, outer,
+           sig: [eig.vals[i0], eig.vals[rest[0]], eig.vals[rest[1]]],
+           negLogDet: -0.5 * Math.log(Math.max(det3(Gx), 1e-300)) };
+}
+
+/* =======================  scene state  ======================= */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const ui = id => document.getElementById(id);
+const cam = { az: 0.85, el: 0.42, dist: 4.0 };
+let X = [], sol = null, W = 0, H = 0, dpr = 1, focal = 1;
+
+function preset(kind) {
+  const c = nz(V(0.35, 0.2, 1)), u1 = nz(cross(V(0, 0, 1), c)), u2 = cross(c, u1);
+  const P = [];
+  const ring = (n, ra, rb, ph = 0) => {
+    for (let k = 0; k < n; k++) { const t = 2*Math.PI*k/n + ph;
+      P.push(nz(add(c, add(scl(u1, ra*Math.cos(t)), scl(u2, rb*Math.sin(t)))))); }
+  };
+  if (kind === 'strip') ring(7, 0.46, 0.15);
+  else if (kind === 'quad') ring(4, 0.34, 0.26, 0.4);
+  else if (kind === 'cap') ring(9, 0.32, 0.29);
+  else {
+    const n = 5 + Math.floor(Math.random() * 5);
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * 2 * Math.PI, r = 0.12 + 0.38 * Math.sqrt(Math.random());
+      P.push(nz(add(c, add(scl(u1, r*Math.cos(a)), scl(u2, r*0.7*Math.sin(a))))));
+    }
+  }
+  X = P;
+}
+
+function recompute() {
+  sol = solve(X, sol && sol.ok ? sol.b : null);
+  readout();
+  draw();
+}
+
+/* =======================  camera  ======================= */
+function basis() {
+  const eye = scl(V(Math.cos(cam.el)*Math.cos(cam.az), Math.cos(cam.el)*Math.sin(cam.az), Math.sin(cam.el)), cam.dist);
+  const fwd = nz(scl(eye, -1));
+  const right = nz(cross(fwd, V(0, 0, 1)));
+  return { eye, fwd, right, up: cross(right, fwd) };
+}
+let B = basis();
+function project(p) {
+  const d = sub(p, B.eye);
+  const z = dot(d, B.fwd);
+  if (z < 0.05) return null;
+  return { x: W/2 + focal * dot(d, B.right) / z, y: H/2 - focal * dot(d, B.up) / z, z };
+}
+function rayAt(px, py) {   // world-space ray direction through a screen pixel
+  return nz(add(add(scl(B.right, (px - W/2) / focal), scl(B.up, -(py - H/2) / focal)), B.fwd));
+}
+function hitSphere(px, py) {
+  const d = rayAt(px, py), o = B.eye;
+  const b2 = dot(o, d), c2 = dot(o, o) - 1, disc = b2*b2 - c2;
+  if (disc < 0) return nz(sub(add(o, scl(d, -b2)), V(0,0,0)));   // graze: nearest point
+  return add(o, scl(d, -b2 - Math.sqrt(disc)));
+}
+
+/* =======================  renderer  ======================= */
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  focal = 1.15 * Math.min(W, H);
+  draw();
+}
+const prims = [];
+const pushLine = (a, b, col, w, z0) => {
+  const A2 = project(a), B2 = project(b); if (!A2 || !B2) return;
+  prims.push({ z: z0 !== undefined ? z0 : (A2.z + B2.z)/2, f: () => {
+    ctx.strokeStyle = col; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(A2.x, A2.y); ctx.lineTo(B2.x, B2.y); ctx.stroke(); } });
+};
+const pushPoly = (pts, fill, stroke, lw) => {
+  const q = pts.map(project); if (q.some(p => !p)) return;
+  prims.push({ z: q.reduce((s, p) => s + p.z, 0) / q.length, f: () => {
+    ctx.beginPath(); ctx.moveTo(q[0].x, q[0].y);
+    for (let i = 1; i < q.length; i++) ctx.lineTo(q[i].x, q[i].y);
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); } } });
+};
+const pushDot = (p, r, fill, stroke, lw) => {
+  const q = project(p); if (!q) return;
+  prims.push({ z: q.z, f: () => {
+    ctx.beginPath(); ctx.arc(q.x, q.y, r * (3.6 / q.z), 0, 7);
+    ctx.fillStyle = fill; ctx.fill();
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1.5; ctx.stroke(); } } });
+};
+
+let LIGHT = nz(V(-0.4, -0.75, 0.75));   // key light, re-aimed over the viewer's shoulder each frame
+
+function sphereWire() {
+  const col = z => `rgba(120,136,160,${0.30 * Math.min(1, Math.max(0.12, (5.2 - z) / 3))})`;
+  for (let m = 0; m < 12; m++) {                       // meridians
+    const a = Math.PI * m / 12;
+    let prev = null;
+    for (let k = 0; k <= 48; k++) {
+      const t = Math.PI * k / 48;
+      const p = V(Math.sin(t)*Math.cos(a), Math.sin(t)*Math.sin(a), Math.cos(t));
+      if (prev) { const q = project(p), r = project(prev);
+        if (q && r) pushLine(prev, p, col((q.z + r.z)/2), 1); }
+      prev = p;
+    }
+  }
+  for (let l = 1; l < 8; l++) {                        // parallels
+    const t = Math.PI * l / 8, s = Math.sin(t), z = Math.cos(t);
+    let prev = null;
+    for (let k = 0; k <= 64; k++) {
+      const a = 2*Math.PI*k/64, p = V(s*Math.cos(a), s*Math.sin(a), z);
+      if (prev) { const q = project(p), r = project(prev);
+        if (q && r) pushLine(prev, p, col((q.z + r.z)/2), 1); }
+      prev = p;
+    }
+  }
+}
+
+// Boundary of C(A,b): in y = Ax coordinates it is the circular cone about
+// ĉ = A⁻¹b/‖A⁻¹b‖ with half-angle arccos(1/‖A⁻¹b‖); pull back through A⁻¹.
+function coneRim(S, N) {
+  const c = mv(S.Ai, S.b), n = len(c), ch = scl(c, 1/n);
+  const th = Math.acos(Math.min(1, 1/n));
+  const [e1, e2] = frameOf(ch), out = [];
+  for (let k = 0; k < N; k++) {
+    const ph = 2*Math.PI*k/N;
+    const y = add(scl(ch, Math.cos(th)), scl(add(scl(e1, Math.cos(ph)), scl(e2, Math.sin(ph))), Math.sin(th)));
+    out.push(nz(mv(S.Ai, y)));
+  }
+  return { rim: out, halfAngle: th, n };
+}
+
+function drawCone(S) {
+  const { rim } = coneRim(S, 128);
+  const gno = ui('cGno').checked;
+  // ruling length: out to the tangent plane bᵀx = 1 when it is shown, else to the sphere
+  const ext = d => gno ? scl(d, 1 / Math.max(dot(S.b, d), 1e-6)) : d;
+  const O = V(0, 0, 0);
+  for (let k = 0; k < rim.length; k++) {
+    const d0 = rim[k], d1 = rim[(k + 1) % rim.length];
+    const p0 = ext(d0), p1 = ext(d1);
+    let nrm = nz(cross(d0, d1));
+    if (dot(nrm, S.b) > 0) nrm = scl(nrm, -1);        // b is interior, so flip to point outward
+    const toEye = nz(sub(B.eye, scl(add(p0, p1), 0.5)));
+    const front = dot(nrm, toEye) > 0;
+    const lam = Math.max(0, dot(nrm, LIGHT));
+    const sh = 0.42 + 0.58 * lam;                       // wrapped lambert
+    const spec = Math.pow(lam, 14) * 90;                // soft highlight
+    const [r, g, bl] = [86, 214, 190].map(c =>
+      Math.round(Math.min(255, c * (front ? sh : sh * 0.55) + (front ? spec : 0))));
+    pushPoly([O, p0, p1], `rgba(${r},${g},${bl},${front ? 0.52 : 0.22})`, null, 0);
+  }
+  const rimCol = gno ? 'rgba(255,180,84,0.95)' : 'rgba(150,255,235,0.95)';
+  for (let k = 0; k < rim.length; k++) {              // rim curve = the cross-section
+    const p0 = ext(rim[k]), p1 = ext(rim[(k + 1) % rim.length]);
+    pushLine(p0, p1, rimCol, 2.2);
+  }
+  for (let k = 0; k < rim.length; k += 16)            // a few rulings for structure
+    pushLine(O, ext(rim[k]), 'rgba(150,255,235,0.30)', 1);
+}
+
+function drawGnomonic(S) {
+  const { H, v, f1, f2 } = S;
+  const e = jacobi([H.a, H.b, 0, H.b, H.d, 0, 0, 0, 1]);   // 2x2 eigen via padded 3x3
+  const ax = [0, 1].map(i => ({ r: 1/Math.sqrt(e.vals[i]), u: V(e.vecs[i], e.vecs[3+i], 0) }));
+  const toW = u => add(add(scl(f1, u.x), scl(f2, u.y)), S.b);   // plane point -> world
+  const R = Math.max(ax[0].r, ax[1].r) * 1.7 + 0.1;
+  const cW = toW(v);
+  const quad = [[-R,-R],[R,-R],[R,R],[-R,R]].map(([a, b]) => toW({ x: v.x + a, y: v.y + b }));
+  pushPoly(quad, 'rgba(122,162,255,0.07)', 'rgba(122,162,255,0.28)', 1);
+  for (const a of ax)                    // the ellipse itself is drawn as the cone rim; show its axes
+    pushLine(toW({ x: v.x - a.r*a.u.x, y: v.y - a.r*a.u.y }),
+             toW({ x: v.x + a.r*a.u.x, y: v.y + a.r*a.u.y }), 'rgba(255,180,84,0.4)', 1);
+  for (const u of S.P) pushDot(toW(u), 3, '#ffd9a0', null);
+  pushDot(cW, 3.5, '#7aa2ff', '#0c0f14', 1.2);
+}
+
+function drawAxes() {
+  const L = 1.45, c = 'rgba(120,140,170,0.5)';
+  for (const [d, lab] of [[V(1,0,0),'x'], [V(0,1,0),'y'], [V(0,0,1),'z']]) {
+    pushLine(V(0,0,0), scl(d, L), c, 1.2);
+    const q = project(scl(d, L * 1.06));
+    if (q) prims.push({ z: q.z, f: () => { ctx.fillStyle = 'rgba(140,160,190,0.75)';
+      ctx.font = '11px ui-monospace, Menlo, monospace'; ctx.fillText(lab, q.x, q.y); } });
+  }
+}
+
+function draw() {
+  B = basis();
+  LIGHT = nz(add(add(scl(B.right, -0.45), scl(B.up, 0.55)), scl(B.fwd, -0.70)));
+  prims.length = 0;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  ctx.fillRect(0, 0, W, H);
+
+  if (ui('cAxes').checked) drawAxes();
+  if (ui('cSphere').checked) sphereWire();
+
+  if (sol && sol.ok) {
+    drawCone(sol);
+    if (ui('cGno').checked) drawGnomonic(sol);
+    if (ui('cRays').checked) for (const x of X)
+      pushLine(V(0,0,0), scl(x, 1 / Math.max(dot(sol.b, x), 1e-6)), 'rgba(180,200,230,0.22)', 1);
+    // axis b
+    const tip = scl(sol.b, ui('cGno').checked ? 1.0 : 1.34);
+    pushLine(V(0,0,0), tip, '#7aa2ff', 2.4);
+    const [a1, a2] = frameOf(sol.b), back = scl(sol.b, -0.075), rad = 0.027;
+    for (let k = 0; k < 12; k++) {                       // arrowhead
+      const t0 = 2*Math.PI*k/12, t1 = 2*Math.PI*(k+1)/12;
+      const r0 = add(add(tip, back), add(scl(a1, rad*Math.cos(t0)), scl(a2, rad*Math.sin(t0))));
+      const r1 = add(add(tip, back), add(scl(a1, rad*Math.cos(t1)), scl(a2, rad*Math.sin(t1))));
+      pushPoly([tip, r0, r1], 'rgba(122,162,255,0.95)', null, 0);
+    }
+    const tq = project(scl(sol.b, 1.42));
+    if (tq) prims.push({ z: tq.z, f: () => { ctx.fillStyle = '#7aa2ff';
+      ctx.font = '12px ui-monospace, Menlo, monospace'; ctx.fillText('b', tq.x + 5, tq.y); } });
+  }
+
+  for (let i = 0; i < X.length; i++) {
+    const x = X[i];
+    const act = sol && sol.ok && Math.abs(len(mv(sol.A, x)) - dot(sol.b, x)) < 1e-7;
+    pushDot(x, act ? 5.2 : 4.2, act ? '#ffb454' : '#94a3bd', '#0c0f14', 1.6);
+  }
+  pushDot(V(0, 0, 0), 2.6, '#5a6478', null);                 // apex
+
+  prims.sort((a, b) => b.z - a.z);
+  for (const p of prims) p.f();
+}
+
+/* =======================  readout  ======================= */
+const f = (v, n = 4) => Number.isFinite(v) ? (Math.abs(v) < 5e-5 ? 0 : v).toFixed(n) : '—';
+function readout() {
+  const fe = ui('feas');
+  ui('np').textContent = X.length;
+  if (!sol || !sol.ok) {
+    fe.className = 'status no'; fe.textContent = sol ? sol.why : '';
+    for (const id of ['csar','s0','s12','ld','bv','ha','nact','iters','resid','prim'])
+      ui(id).textContent = '—';
+    ui('Amat').innerHTML = '';
+    return;
+  }
+  fe.className = 'status ok'; fe.textContent = 'solved — cone encloses all points';
+  const [s0, s1, s2] = sol.sig;
+  ui('csar').textContent = f(s2 / s1, 4);
+  ui('s0').textContent = `${f(s0, 6)}   (1/√3 = ${f(1/Math.sqrt(3), 6)})`;
+  ui('s12').textContent = `${f(s1)}, ${f(s2)}`;
+  ui('ld').textContent = f(sol.negLogDet, 6);
+  ui('bv').textContent = `(${f(sol.b.x, 3)}, ${f(sol.b.y, 3)}, ${f(sol.b.z, 3)})`;
+  const c = mv(sol.Ai, sol.b), n = len(c);
+  ui('ha').textContent = `${f(Math.acos(Math.min(1, 1/n)) * 180/Math.PI, 2)}°`;
+  ui('Amat').innerHTML = sol.A.map(x => `<div>${f(x, 3)}</div>`).join('');
+  let worst = -Infinity, act = 0;
+  for (const x of X) { const r = len(mv(sol.A, x)) - dot(sol.b, x);
+    worst = Math.max(worst, r); if (Math.abs(r) < 1e-7) act++; }
+  ui('nact').textContent = `${act} / ${X.length}`;
+  ui('iters').textContent = sol.outer;
+  ui('resid').textContent = Math.hypot(sol.v.x, sol.v.y).toExponential(2);
+  ui('prim').textContent = worst.toExponential(2);
+}
+
+/* =======================  interaction  ======================= */
+let mode = null, dragIdx = -1, last = null;
+function pickPoint(px, py) {
+  let best = -1, bz = Infinity;
+  for (let i = 0; i < X.length; i++) {
+    const q = project(X[i]); if (!q) continue;
+    if (Math.hypot(q.x - px, q.y - py) < 13 && q.z < bz) { best = i; bz = q.z; }
+  }
+  return best;
+}
+cv.addEventListener('pointerdown', e => {
+  const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  const i = pickPoint(px, py);
+  if (e.shiftKey && i < 0) { X.push(hitSphere(px, py)); recompute(); return; }
+  if (i >= 0) { mode = 'pt'; dragIdx = i; } else { mode = 'orbit'; last = { x: px, y: py }; }
+  cv.classList.add('dragging');
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+});
+cv.addEventListener('pointermove', e => {
+  const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  if (mode === 'orbit') {
+    cam.az -= (px - last.x) * 0.008;
+    cam.el = Math.max(-1.45, Math.min(1.45, cam.el + (py - last.y) * 0.008));
+    last = { x: px, y: py };
+    draw();
+  } else if (mode === 'pt') {
+    X[dragIdx] = hitSphere(px, py);
+    recompute();
+  } else {
+    cv.style.cursor = pickPoint(px, py) >= 0 ? 'pointer' : 'grab';
+  }
+});
+const end = () => { mode = null; dragIdx = -1; cv.classList.remove('dragging'); };
+cv.addEventListener('pointerup', end);
+cv.addEventListener('pointercancel', end);
+cv.addEventListener('dblclick', e => {
+  const r = cv.getBoundingClientRect();
+  const i = pickPoint(e.clientX - r.left, e.clientY - r.top);
+  if (i >= 0 && X.length > 3) { X.splice(i, 1); recompute(); }
+});
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  cam.dist = Math.min(14, Math.max(1.8, cam.dist * Math.exp(e.deltaY * 0.0012)));
+  draw();
+}, { passive: false });
+
+for (const btn of document.querySelectorAll('[data-preset]'))
+  btn.onclick = () => { preset(btn.dataset.preset); sol = null; recompute(); };
+ui('addPt').onclick = () => {
+  const c = nz(X.reduce((s, x) => add(s, x), V(0,0,0)));
+  const [u1, u2] = frameOf(c), a = Math.random()*2*Math.PI, r = 0.2 + 0.3*Math.random();
+  X.push(nz(add(c, add(scl(u1, r*Math.cos(a)), scl(u2, r*Math.sin(a))))));
+  recompute();
+};
+ui('resetCam').onclick = () => { cam.az = 0.85; cam.el = 0.42; cam.dist = 4.0; draw(); };
+for (const id of ['cSphere', 'cGno', 'cRays', 'cAxes']) ui(id).addEventListener('change', draw);
+window.addEventListener('resize', resize);
+
+preset('strip');
+resize();
+recompute();
+})();
+</script>
+</body>
+</html>
