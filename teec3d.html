@@ -456,11 +456,16 @@ function sphereWire() {
     const t = Math.min(1, Math.max(0, (cam.dist + 1 - z) / 2));   // 1 near, 0 far
     return `rgba(88,104,128,${(0.10 + 0.24 * t).toFixed(3)})`;
   };
+  // Meridians stop short of the poles, as a printed graticule does: run them all
+  // the way and twelve lines converge on one point, leaving an ink blot at each
+  // pole. Parallels already stop at ±67.5°, so ±80° lets the meridians reach a
+  // little past the last one without collapsing.
+  const POLE_GAP = 10 * Math.PI / 180;
   for (let m = 0; m < 12; m++) {                       // meridians, every 30°
     const a = 2 * Math.PI * m / 12;
     let prev = null;
     for (let k = 0; k <= 48; k++) {
-      const t = Math.PI * k / 48;
+      const t = POLE_GAP + (Math.PI - 2 * POLE_GAP) * k / 48;
       const p = V(Math.sin(t)*Math.cos(a), Math.sin(t)*Math.sin(a), Math.cos(t));
       if (prev) { const q = project(p), r = project(prev);
         if (q && r) pushLine(prev, p, col((q.z + r.z)/2), 1); }
