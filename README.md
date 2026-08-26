@@ -2,12 +2,12 @@
 
 Two self-contained pages (no build, no deps):
 
-- `index.html` — 2D playground. You set `A` and `b` by hand and watch `C(A, b)`.
-- `teec3d.html` — 3D. You set the *points*, and it solves the TEEC problem for them.
+- `index.html` — 3D. You set the *points*, and it solves the TEEC problem for them.
+- `playground.html` — 2D playground. You set `A` and `b` by hand and watch `C(A, b)`.
 
 ---
 
-# index.html — 2D playground for C(A, b)
+# playground.html — 2D playground for C(A, b)
 
 Interactive 2D version of the object from `csar_paper`:
 
@@ -72,7 +72,7 @@ delete · `r` or **reset all** to restore defaults.
 
 ---
 
-# teec3d.html — the TEEC problem in 3D
+# index.html — the TEEC problem in 3D
 
 The controls are the points. Drag them on the unit sphere and the page re-solves
 
@@ -165,6 +165,6 @@ point: that is the optimality condition, visible.
 NOT necessarily the smallest. Once the cone exceeds ~54.7 deg in some
 direction, that tangent semi-axis drops below `1/sqrt(3)`, so identifying
 `sigma_0` by sorting mislabels it and corrupts the reported CSAR — at an 85 deg
-cap it read 4.44 instead of 1.53. `teec3d.html` identifies it by eigenvector
+cap it read 4.44 instead of 1.53. `index.html` identifies it by eigenvector
 alignment with `b` instead. (csar_zig avoids this structurally: its `sigma[0]`
 is the axial eigenvalue by construction.)
