@@ -1,4 +1,4 @@
-# cone_viz — interactive views of the ellipsoidal cone
+# csar_viz — interactive views of the ellipsoidal cone
 
 Two self-contained pages (no build, no deps):
 
