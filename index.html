@@ -20,7 +20,14 @@
   body { background: var(--bg); color: var(--fg); display: flex; overflow: hidden;
     font: 13px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; }
   #stage { flex: 1 1 auto; position: relative; min-width: 0; }
-  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  /* touch-action: none — the canvas handles its own gestures. Without
+     it the browser claims a one-finger drag for page panning: the
+     pointerdown arrives, then the scroll takes over mid-gesture and
+     the page fires pointercancel, so orbiting and dragging points both
+     stutter and fight the scroll. Pointer capture cannot outrank the
+     browser's gesture arbitration; opting out is the only fix. Scoped
+     to the canvas, so the panel below it still scrolls normally. */
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
   canvas.dragging { cursor: grabbing; }
   #hint { position: absolute; left: 14px; bottom: 12px; color: var(--dim); font-size: 11.5px;
     pointer-events: none; }
@@ -62,7 +69,7 @@
 <div id="stage">
   <canvas id="cv"></canvas>
   <a id="back" href="playground.html">2D playground →</a>
-  <div id="hint">drag to orbit · scroll to zoom · drag a point to move it on the sphere · shift-click the sphere to add · double-click a point to delete</div>
+  <div id="hint">drag to orbit · scroll or pinch to zoom · drag a point to move it on the sphere · shift-click the sphere to add · double-click a point to delete</div>
 </div>
 
 <aside>
@@ -723,16 +730,47 @@ function pickPoint(px, py) {
   }
   return best;
 }
+// Every pointer currently down, so a second finger starts a pinch
+// instead of hijacking the drag in progress. Wheel-zoom has no touch
+// equivalent (wheel never fires from a touch), and the canvas opts out
+// of the browser's own pinch, so this is the only zoom on mobile.
+const active = new Map();
+let pinch = null;
+const spread = () => {
+  const [a, b] = [...active.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+
 cv.addEventListener('pointerdown', e => {
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  active.set(e.pointerId, { x: px, y: py });
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+
+  if (active.size === 2) {
+    // Second finger: abandon whatever the first was doing and pinch.
+    pinch = { spread: spread(), dist: cam.dist };
+    mode = null; dragIdx = -1;
+    return;
+  }
+  if (active.size > 2) return;
+
   const i = pickPoint(px, py);
   if (e.shiftKey && i < 0) { X.push(hitSphere(px, py)); recompute(); return; }
   if (i >= 0) { mode = 'pt'; dragIdx = i; } else { mode = 'orbit'; last = { x: px, y: py }; }
   cv.classList.add('dragging');
-  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
 });
 cv.addEventListener('pointermove', e => {
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  if (active.has(e.pointerId)) active.set(e.pointerId, { x: px, y: py });
+
+  if (pinch && active.size >= 2) {
+    const s = spread();
+    if (s > 0) {
+      cam.dist = Math.min(14, Math.max(1.8, pinch.dist * pinch.spread / s));
+      schedule('draw');
+    }
+    return;
+  }
   if (mode === 'orbit') {
     cam.az -= (px - last.x) * 0.008;
     cam.el = Math.max(-1.45, Math.min(1.45, cam.el + (py - last.y) * 0.008));
@@ -745,7 +783,18 @@ cv.addEventListener('pointermove', e => {
     cv.style.cursor = pickPoint(px, py) >= 0 ? 'pointer' : 'grab';
   }
 });
-const end = () => { mode = null; dragIdx = -1; cv.classList.remove('dragging'); };
+const end = e => {
+  if (e) active.delete(e.pointerId);
+  if (active.size < 2) pinch = null;
+  // Lifting one finger of a pinch: keep orbiting from where the other
+  // one is, rather than jumping by the gap between them.
+  if (active.size === 1) {
+    const [p] = [...active.values()];
+    mode = 'orbit'; last = { x: p.x, y: p.y };
+    return;
+  }
+  mode = null; dragIdx = -1; cv.classList.remove('dragging');
+};
 cv.addEventListener('pointerup', end);
 cv.addEventListener('pointercancel', end);
 cv.addEventListener('dblclick', e => {
