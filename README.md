@@ -1,9 +1,13 @@
 # csar_viz — interactive views of the ellipsoidal cone
 
-Two self-contained pages (no build, no deps):
+Two pages, no build step:
 
-- `index.html` — 3D. You set the *points*, and it solves the TEEC problem for them.
-- `playground.html` — 2D playground. You set `A` and `b` by hand and watch `C(A, b)`.
+- `index.html` — 3D. You set the *points*, and it solves the TEEC problem for
+  them, running the real solver as WebAssembly (`vendor/`, see below). ES
+  modules and wasm need http, so serve the directory rather than opening the
+  file: `python3 -m http.server`.
+- `playground.html` — 2D playground, self-contained and dependency-free. You
+  set `A` and `b` by hand and watch `C(A, b)`.
 
 ---
 
@@ -85,11 +89,23 @@ support set (the points that end up on the cone boundary).
 
 ## How it solves it in the browser
 
-It runs **csar itself**, compiled to `wasm32-freestanding` and inlined as
-base64 (`csar_wasm/src/shim.zig`). The page stays a single file that opens from
-`file://`, there is no second implementation of the algorithm to keep in step,
-and the panel can report the *certified duality gap* instead of asserting a
-number. Rank-deficient input is reported as such rather than silently answered.
+It runs **csar itself**, compiled to `wasm32-freestanding`. The page loads
+`vendor/csar.wasm` through `vendor/csar.js` — the ABI's own JavaScript
+declaration — both vendored as a pair from a
+[csar_abi](https://github.com/ajfriend/csar_abi) release. So there is no second
+implementation of the algorithm to keep in step, and the status codes and
+result-struct offsets are declared by `csar.js` rather than transcribed here —
+csar_abi gates those declarations against the solver's C ABI. (One constant is
+still spelled out in the page: the `1e30` no-certificate gap sentinel, which
+the ABI passes through but does not yet name.) The panel reports the *certified
+duality gap* instead of asserting a number, and rank-deficient input is
+reported as such rather than silently answered.
+
+`vendor/` holds a matched pair from one release — `csar.js` reads the result
+struct at offsets `csar.wasm` defines, so they are only valid together. The
+page checks that the module agrees with the version it was written against, and
+shows the solver and ABI versions in the panel. `vendor/PROVENANCE` records the
+release, the checksums, and how to update.
 
 The page previously carried its own JavaScript solver. What that solver did,
 and why it is the same algorithm, is kept below because it explains the picture
@@ -121,10 +137,14 @@ gnomonic projection onto the tangent plane at `b`. Therefore
 
 * `b` comes out an eigenvector of `A` with eigenvalue exactly `1/sqrt(3)` — the
   paper's appendix result, never imposed by the code. Shown in the panel.
-* max `||A x_i|| - b^T x_i` is `<= ~1e-14` on every configuration tested.
-* agrees with a 90,000-axis brute-force scan of `-log det A` to ~5e-13.
-* feasible/infeasible verdicts match an independent max-margin oracle on 300
-  random point sets, in both directions.
+* max `||A x_i|| - b^T x_i` is `<= ~1e-14` on every configuration tested. Also
+  shown in the panel, so it is checkable live rather than asserted here.
+
+The removed JS solver additionally agreed with a 90,000-axis brute-force scan
+of `-log det A` to ~5e-13, and matched an independent max-margin oracle on 300
+random point sets in both directions. The wasm solver carries its own test
+suite upstream, and reports a certified duality gap per solve — a stronger
+statement than either.
 
 ## Display
 
@@ -150,9 +170,9 @@ for a normal cap and ~1 ms for a zoomed-in near-hemisphere one.
 The "coastlines" toggle draws Natural Earth's 110m coastline on the globe,
 which makes the sphere's orientation legible and puts the DGGS use case in
 view. The data is embedded, not fetched: quantised to 0.1 degrees and delta
-encoded, 133 rings / 5119 points / ~27 KB, so the page stays a single file that
-opens from `file://`. Natural Earth is public domain; the same source
-`csar_zig/scripts/gen_countries.py` uses.
+encoded, 133 rings / 5119 points / ~27 KB — small enough to inline, and it has
+no ABI to keep in step the way the solver does. Natural Earth is public domain;
+the same source `csar_zig/scripts/gen_countries.py` uses.
 
 The "gnomonic plane" toggle draws the tangent plane at `b`, the projected points,
 and the cross-section ellipse — whose axis ratio *is* the CSAR. Note the cone rim
@@ -165,6 +185,7 @@ point: that is the optimality condition, visible.
 NOT necessarily the smallest. Once the cone exceeds ~54.7 deg in some
 direction, that tangent semi-axis drops below `1/sqrt(3)`, so identifying
 `sigma_0` by sorting mislabels it and corrupts the reported CSAR — at an 85 deg
-cap it read 4.44 instead of 1.53. `index.html` identifies it by eigenvector
-alignment with `b` instead. (csar_zig avoids this structurally: its `sigma[0]`
-is the axial eigenvalue by construction.)
+cap it read 4.44 instead of 1.53. The removed JS solver identified it by
+eigenvector alignment with `b`; the wasm solver avoids the trap structurally —
+its `sigma[0]` is the axial eigenvalue by construction, which is what the page
+relies on now.
