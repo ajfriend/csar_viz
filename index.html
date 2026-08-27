@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TEEC — tightest enclosing ellipsoidal cone in 3D</title>
+<!-- The wasm URL is a string inside csar.js, so the preload scanner
+     can't see it and the two fetches would serialize behind the module
+     graph. Measured: 863 ms to solver-ready without these, 726 ms with. -->
+<link rel="modulepreload" href="./vendor/csar.js">
+<link rel="preload" href="./vendor/csar.wasm" as="fetch" crossorigin>
 <style>
   :root {
     --bg: #ffffff; --panel: #f6f7f9; --line: #dfe3e9; --fg: #1a1f28; --dim: #667085;
@@ -84,6 +89,7 @@
   <div class="row"><span class="k">outer iterations</span><span class="v" id="iters"></span></div>
   <div class="row"><span class="k">certified gap</span><span class="v" id="resid"></span></div>
   <div class="row"><span class="k">max ‖Axᵢ‖ − bᵀxᵢ</span><span class="v" id="prim"></span></div>
+  <div class="row"><span class="k">solver</span><span class="v" id="ver">…</span></div>
 
   <h2>Points</h2>
   <div class="btns">
@@ -117,7 +123,7 @@
 </aside>
 
 <script type="module">
-import { init as csarInit, solve as csarSolve } from './vendor/csar.js';
+import { init, solve as csarSolve, versions } from './vendor/csar.js';
 
 /* =======================  linear algebra  ======================= */
 const V = (x, y, z) => ({ x, y, z });
@@ -132,39 +138,46 @@ const mv = (M, x) => V(M[0]*x.x + M[1]*x.y + M[2]*x.z,
                        M[3]*x.x + M[4]*x.y + M[5]*x.z,
                        M[6]*x.x + M[7]*x.y + M[8]*x.z);
 /* =======================  the solver  =======================
-   csar itself, compiled to wasm32-freestanding, loaded from
-   vendor/csar.wasm through vendor/csar.js — the ABI's own JavaScript
-   declaration, vendored as a pair from a csar_abi release
-   (github.com/ajfriend/csar_abi). There is no second implementation
-   of the algorithm to keep in step, and no code table or struct
-   offset transcribed into this page: csar.js declares them, and its
-   repo gates them against the source of truth.
+   csar itself as wasm. vendor/csar.js is the ABI's own JavaScript
+   declaration — the status codes and the result-struct offsets live
+   there, gated against the solver's C ABI upstream, not transcribed
+   here. (One exception, marked below: the no-certificate gap
+   sentinel, which the ABI does not yet name.)
 
    ESM + wasm need http, so serve this directory rather than opening
    the file directly:  python3 -m http.server
    ============================================================== */
 
-let READY = false;
+// csar_zig's GAP_UNCERTIFIED (src/config.zig): "no certificate could
+// be constructed", so Q and sigma carry no information. It reaches us
+// unchanged through the ABI but has no CSAR_* name yet, so this is the
+// one solver constant the page still spells out. Filed upstream.
+// vendor/ is a matched pair from this csar_abi release; boot checks
+// the module agrees. See vendor/PROVENANCE.
+const VENDORED_ABI = '0.2.0';
+
+const GAP_UNCERTIFIED = 1e30;
+
+// The cross-section budget that pins sigma[0] = 1/sqrt(3). Geometry,
+// not a knob (csar_zig's config.zig says so); the page derives the
+// cross-section ellipse from it.
+const TAU = 2 / 3;
 
 function solve(X) {
-  if (!READY) return { ok: false, why: 'loading solver…' };
-  if (X.length < 3) return { ok: false, why: 'need at least 3 points' };
-
   let r;
   try {
     r = csarSolve(X.map(p => [p.x, p.y, p.z]));
   } catch (e) {
-    // A nonzero call code: the solve could not run at all.
-    return { ok: false, why: String(e.message || e).replace(/^csar: /, '') };
+    // A nonzero call code: the solve could not run at all. csar.js
+    // formats these; strip its prefix for the panel's voice.
+    return { ok: false, why: e.message.replace(/^csar: /, '') };
   }
 
   if (r.status === 'infeasible') {
     return { ok: false,
              why: 'points are not contained in an open half-space — no enclosing cone exists' };
   }
-  // gap 1e30 is upstream's "no certificate could be constructed"
-  // sentinel; Q and sigma carry no information in that state.
-  if (r.gap >= 1e29) {
+  if (r.gap === GAP_UNCERTIFIED) {
     return { ok: false,
              why: `no certificate (gap floor ${r.gap_floor.toExponential(2)})` };
   }
@@ -183,18 +196,19 @@ function solve(X) {
       Ai[i*3+j] += u[i] * u[j] / sk;
     }
   }
-  // Cross-section at bᵀx = 1: (u−v)ᵀH(u−v) ≤ 1 with H = G11/tau, tau = 2/3 and
+  // Cross-section at bᵀx = 1: (u−v)ᵀH(u−v) ≤ 1 with H = G11/TAU and
   // G11 the tangent block of A². In the eigenbasis that block is diag(s1², s2²),
   // so H is diagonal and the ellipse is centred on the tangency point (v = 0).
-  const H = { a: 1.5 * sig[1] * sig[1], b: 0, d: 1.5 * sig[2] * sig[2] };
+  const H = { a: sig[1] * sig[1] / TAU, b: 0, d: sig[2] * sig[2] / TAU };
   const P = X.map(x => { const d = dot(b, x); return { x: dot(f1, x) / d, y: dot(f2, x) / d }; });
   // The support set comes from the certificate's dual multipliers --
   // nonzero exactly on the active points -- rather than from a tolerance on the
   // primal residual, which is an absolute test on a quantity that scales with A.
   // Only a certified outcome has them; uncertified ones show none.
-  const lam = r.lambdas ? Array.from(r.lambdas) : new Array(X.length).fill(0);
+  const lam = r.lambdas ?? new Float64Array(X.length);
   return { ok: true, b, A, Ai, H, v: { x: 0, y: 0 }, f1, f2, P, sig,
-           gap: r.gap, floor: r.gap_floor ?? 0, outer: r.iters, lam,
+           gap: r.gap, floor: r.gap_floor, outer: r.iters, lam,
+           aspect: r.aspectRatio, status: r.status,
            uncertified: r.status !== 'converged',
            negLogDet: -(Math.log(sig[0]) + Math.log(sig[1]) + Math.log(sig[2])) };
 }
@@ -653,11 +667,17 @@ function readout() {
     return;
   }
   fe.className = sol.uncertified ? 'status no' : 'status ok';
-  fe.textContent = sol.uncertified
-    ? `gap ${sol.gap.toExponential(2)} above the f64 floor ${sol.floor.toExponential(2)} — cone shown, not certified`
+  // The two uncertified outcomes have opposite remedies upstream:
+  // precision_floor means f64 cannot certify tighter (loosen gap_tol),
+  // did_not_converge means the budget ran out (raise max_outer).
+  fe.textContent = sol.status === 'precision_floor'
+    ? `gap ${sol.gap.toExponential(2)} is at this input's f64 floor ${sol.floor.toExponential(2)} — cone shown, not certified`
+    : sol.status === 'did_not_converge'
+    ? `gap ${sol.gap.toExponential(2)} still above the floor ${sol.floor.toExponential(2)} — iteration budget ran out, cone not certified`
     : 'solved — cone encloses all points';
   const [s0, s1, s2] = sol.sig;
-  ui('csar').textContent = f(s2 / s1, 4);
+  // Certified outcomes carry the ratio; uncertified ones don't, by design.
+  ui('csar').textContent = f(sol.aspect ?? s2 / s1, 4);
   ui('s0').textContent = `${f(s0, 6)}   (1/√3 = ${f(1/Math.sqrt(3), 6)})`;
   ui('s12').textContent = `${f(s1)}, ${f(s2)}`;
   ui('ld').textContent = f(sol.negLogDet, 6);
@@ -753,9 +773,35 @@ window.addEventListener('resize', resize);
 
 preset('strip');
 resize();
-readout();
-await csarInit('./vendor/csar.wasm');
-READY = true;
+
+// Paint the sphere first, then load the solver. The panel says so on
+// screen: a failure here is most likely someone opening this file
+// directly, which used to work and no longer can.
+ui('feas').className = 'status';
+ui('feas').textContent = 'loading solver…';
+try {
+  await init('./vendor/csar.wasm');
+} catch (e) {
+  ui('feas').className = 'status no';
+  ui('feas').textContent =
+    'could not load the solver — serve this directory over http '
+    + '(python3 -m http.server) rather than opening the file.';
+  throw e;
+}
+
+// The pair must come from one release: csar.js reads the result struct
+// at offsets csar.wasm's layout defines, and a mismatched pair would
+// read plausible nonsense rather than fail. Only csar_abi's gate ties
+// them together, and it cannot see this repo's vendor/.
+const ver = versions();
+if (ver.abi !== VENDORED_ABI) {
+  ui('feas').className = 'status no';
+  ui('feas').textContent =
+    `vendor/ mismatch: csar.js expects ABI ${VENDORED_ABI}, csar.wasm reports ${ver.abi}`;
+  throw new Error('csar_viz: vendored pair is not from one release');
+}
+ui('ver').textContent = `csar ${ver.solver} · abi ${ver.abi}`;
+
 recompute();
 </script>
 </body>

@@ -93,15 +93,19 @@ It runs **csar itself**, compiled to `wasm32-freestanding`. The page loads
 `vendor/csar.wasm` through `vendor/csar.js` — the ABI's own JavaScript
 declaration — both vendored as a pair from a
 [csar_abi](https://github.com/ajfriend/csar_abi) release. So there is no second
-implementation of the algorithm to keep in step, and no code table or struct
-offset transcribed into this page: `csar.js` declares them, and its repo gates
-those declarations against the solver's C ABI. The panel reports the *certified
-duality gap* instead of asserting a number, and rank-deficient input is reported
-as such rather than silently answered.
+implementation of the algorithm to keep in step, and the status codes and
+result-struct offsets are declared by `csar.js` rather than transcribed here —
+csar_abi gates those declarations against the solver's C ABI. (One constant is
+still spelled out in the page: the `1e30` no-certificate gap sentinel, which
+the ABI passes through but does not yet name.) The panel reports the *certified
+duality gap* instead of asserting a number, and rank-deficient input is
+reported as such rather than silently answered.
 
-To update the solver, drop a newer release's `csar.js` + `csar.wasm` into
-`vendor/` — they are a matched pair from one tag. The page can name what it is
-running: `versions()` returns the ABI and solver versions out of the module.
+`vendor/` holds a matched pair from one release — `csar.js` reads the result
+struct at offsets `csar.wasm` defines, so they are only valid together. The
+page checks that the module agrees with the version it was written against, and
+shows the solver and ABI versions in the panel. `vendor/PROVENANCE` records the
+release, the checksums, and how to update.
 
 The page previously carried its own JavaScript solver. What that solver did,
 and why it is the same algorithm, is kept below because it explains the picture
@@ -133,10 +137,14 @@ gnomonic projection onto the tangent plane at `b`. Therefore
 
 * `b` comes out an eigenvector of `A` with eigenvalue exactly `1/sqrt(3)` — the
   paper's appendix result, never imposed by the code. Shown in the panel.
-* max `||A x_i|| - b^T x_i` is `<= ~1e-14` on every configuration tested.
-* agrees with a 90,000-axis brute-force scan of `-log det A` to ~5e-13.
-* feasible/infeasible verdicts match an independent max-margin oracle on 300
-  random point sets, in both directions.
+* max `||A x_i|| - b^T x_i` is `<= ~1e-14` on every configuration tested. Also
+  shown in the panel, so it is checkable live rather than asserted here.
+
+The removed JS solver additionally agreed with a 90,000-axis brute-force scan
+of `-log det A` to ~5e-13, and matched an independent max-margin oracle on 300
+random point sets in both directions. The wasm solver carries its own test
+suite upstream, and reports a certified duality gap per solve — a stronger
+statement than either.
 
 ## Display
 
@@ -177,6 +185,7 @@ point: that is the optimality condition, visible.
 NOT necessarily the smallest. Once the cone exceeds ~54.7 deg in some
 direction, that tangent semi-axis drops below `1/sqrt(3)`, so identifying
 `sigma_0` by sorting mislabels it and corrupts the reported CSAR — at an 85 deg
-cap it read 4.44 instead of 1.53. `index.html` identifies it by eigenvector
-alignment with `b` instead. (csar_zig avoids this structurally: its `sigma[0]`
-is the axial eigenvalue by construction.)
+cap it read 4.44 instead of 1.53. The removed JS solver identified it by
+eigenvector alignment with `b`; the wasm solver avoids the trap structurally —
+its `sigma[0]` is the axial eigenvalue by construction, which is what the page
+relies on now.
