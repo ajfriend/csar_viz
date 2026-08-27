@@ -20,7 +20,11 @@
   body { background: var(--bg); color: var(--fg); display: flex; overflow: hidden;
     font: 13px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; }
   #stage { flex: 1 1 auto; position: relative; min-width: 0; }
-  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  /* Without touch-action the browser claims a one-finger drag for page
+     scrolling mid-gesture — pointerdown arrives, then pointercancel —
+     so orbiting and dragging points stutter. Pointer capture cannot
+     outrank gesture arbitration. */
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
   canvas.dragging { cursor: grabbing; }
   #hint { position: absolute; left: 14px; bottom: 12px; color: var(--dim); font-size: 11.5px;
     pointer-events: none; }
@@ -62,7 +66,7 @@
 <div id="stage">
   <canvas id="cv"></canvas>
   <a id="back" href="playground.html">2D playground →</a>
-  <div id="hint">drag to orbit · scroll to zoom · drag a point to move it on the sphere · shift-click the sphere to add · double-click a point to delete</div>
+  <div id="hint">drag to orbit · scroll or pinch to zoom · drag a point to move it on the sphere · with a mouse: shift-click the sphere to add, double-click a point to delete</div>
 </div>
 
 <aside>
@@ -233,6 +237,12 @@ function frameOf(b) {
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const ui = id => document.getElementById(id);
 const cam = { az: 0.85, el: 0.42, dist: 4.0 };
+// The camera owns its own limits: wheel and pinch both zoom through
+// here, so the bounds cannot drift apart per input device.
+const setDist = d => {
+  cam.dist = Math.min(14, Math.max(1.8, d));
+  schedule('draw');
+};
 let X = [], sol = null, W = 0, H = 0, dpr = 1, focal = 1;
 
 function preset(kind) {
@@ -699,7 +709,7 @@ function readout() {
 }
 
 /* =======================  interaction  ======================= */
-let mode = null, dragIdx = -1, last = null;
+let mode = null, dragIdx = -1;
 
 // Input can outpace the display, and work done between two frames is never
 // seen. Fold it: state updates stay synchronous, the expensive tail runs once
@@ -723,20 +733,50 @@ function pickPoint(px, py) {
   }
   return best;
 }
+// Every pointer currently down, so a second finger starts a pinch
+// instead of hijacking the drag in progress. Wheel-zoom has no touch
+// equivalent (wheel never fires from a touch), and the canvas opts out
+// of the browser's own pinch, so this is the only zoom on mobile.
+const active = new Map();
+let pinch = null;
+const spread = () => {
+  const [a, b] = active.values();
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+
 cv.addEventListener('pointerdown', e => {
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  active.set(e.pointerId, { x: px, y: py });
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+
+  if (active.size === 2) {
+    // Second finger: abandon whatever the first was doing and pinch.
+    pinch = { spread: spread(), dist: cam.dist };
+    mode = null; dragIdx = -1;
+    return;
+  }
+  if (active.size > 2) return;
+
   const i = pickPoint(px, py);
   if (e.shiftKey && i < 0) { X.push(hitSphere(px, py)); recompute(); return; }
-  if (i >= 0) { mode = 'pt'; dragIdx = i; } else { mode = 'orbit'; last = { x: px, y: py }; }
+  if (i >= 0) { mode = 'pt'; dragIdx = i; } else { mode = 'orbit'; }
   cv.classList.add('dragging');
-  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
 });
 cv.addEventListener('pointermove', e => {
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
-  if (mode === 'orbit') {
-    cam.az -= (px - last.x) * 0.008;
-    cam.el = Math.max(-1.45, Math.min(1.45, cam.el + (py - last.y) * 0.008));
-    last = { x: px, y: py };
+  // Where this pointer was last seen, before we overwrite it — the map
+  // is the only record of pointer positions.
+  const prev = active.get(e.pointerId);
+  if (prev) active.set(e.pointerId, { x: px, y: py });
+
+  if (pinch && active.size >= 2) {
+    const s = spread();
+    if (s > 0) setDist(pinch.dist * pinch.spread / s);
+    return;
+  }
+  if (mode === 'orbit' && prev) {
+    cam.az -= (px - prev.x) * 0.008;
+    cam.el = Math.max(-1.45, Math.min(1.45, cam.el + (py - prev.y) * 0.008));
     schedule('draw');
   } else if (mode === 'pt') {
     X[dragIdx] = hitSphere(px, py);
@@ -745,7 +785,15 @@ cv.addEventListener('pointermove', e => {
     cv.style.cursor = pickPoint(px, py) >= 0 ? 'pointer' : 'grab';
   }
 });
-const end = () => { mode = null; dragIdx = -1; cv.classList.remove('dragging'); };
+const end = e => {
+  active.delete(e.pointerId);
+  if (active.size < 2) pinch = null;
+  // Lifting one finger of a pinch leaves the other still down: orbit
+  // from wherever it is. Its map entry is already its current
+  // position, so the next move measures from there and cannot jump.
+  if (active.size === 1) { mode = 'orbit'; return; }
+  mode = null; dragIdx = -1; cv.classList.remove('dragging');
+};
 cv.addEventListener('pointerup', end);
 cv.addEventListener('pointercancel', end);
 cv.addEventListener('dblclick', e => {
@@ -755,8 +803,7 @@ cv.addEventListener('dblclick', e => {
 });
 cv.addEventListener('wheel', e => {
   e.preventDefault();
-  cam.dist = Math.min(14, Math.max(1.8, cam.dist * Math.exp(e.deltaY * 0.0012)));
-  schedule('draw');
+  setDist(cam.dist * Math.exp(e.deltaY * 0.0012));
 }, { passive: false });
 
 for (const btn of document.querySelectorAll('[data-preset]'))
@@ -767,7 +814,7 @@ ui('addPt').onclick = () => {
   X.push(nz(add(c, add(scl(u1, r*Math.cos(a)), scl(u2, r*Math.sin(a))))));
   recompute();
 };
-ui('resetCam').onclick = () => { cam.az = 0.85; cam.el = 0.42; cam.dist = 4.0; draw(); };
+ui('resetCam').onclick = () => { cam.az = 0.85; cam.el = 0.42; setDist(4.0); };
 for (const id of ['cSphere', 'cLand', 'cGno', 'cRays', 'cHull']) ui(id).addEventListener('change', draw);
 window.addEventListener('resize', resize);
 
