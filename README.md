@@ -96,6 +96,7 @@ be iframed (a slide deck, a blog post):
     ?preset=strip       initial point set: strip | quad | cap | rand
     ?show=gno,rays      overlay toggles, comma-separated: sphere land gno rays hull
                         (listed ones on, the rest off; omit to keep the defaults)
+    ?dist=2.8           initial camera distance (default 4; smaller is a bigger globe)
 
 For example `index.html?embed&preset=quad&show=sphere,hull,gno`. Interaction
 (orbit, zoom, drag points, shift-click to add, double-click to delete) still

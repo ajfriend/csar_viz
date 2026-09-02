@@ -829,9 +829,11 @@ window.addEventListener('resize', resize);
      ?embed             hide the sidebar, hint, and back link; canvas fills the page
      ?preset=strip      initial point set: strip | quad | cap | rand
      ?show=gno,rays     overlay toggles, comma-separated: sphere land gno rays hull
-                        (listed ones on, the rest off; omit to keep the defaults) */
+                        (listed ones on, the rest off; omit to keep the defaults)
+     ?dist=2.8          initial camera distance (default 4; smaller is a bigger globe) */
 const params = new URLSearchParams(location.search);
 preset(params.get('preset') || 'strip');
+if (params.has('dist')) { const d = Number(params.get('dist')); if (d > 0) setDist(d); }
 if (params.has('show')) {
   const on = new Set(params.get('show').split(',').map(t => t.trim()).filter(Boolean));
   for (const k of ['Sphere', 'Land', 'Gno', 'Rays', 'Hull'])
