@@ -2,7 +2,7 @@
 
 A matched pair from one csar_abi release — csar.js reads the result
 struct at offsets csar.wasm defines, so they are only valid together.
-index.html checks the module agrees with VENDORED_ABI at boot.
+teec.js checks the module agrees with VENDORED_ABI when it loads.
 
 source:  https://github.com/ajfriend/csar_abi/releases/tag/v0.2.0
 abi:     v0.2.0
@@ -14,4 +14,4 @@ e8f2133baa9ec1df3abd4641ba3c71e64dc8da13f2dd762fc8c2d09713b2ddb2    csar.js
 866f200b825f9f752787aadf0dba93c1dc6e353c473d06aee9fa62e09bfdbc81    csar.wasm
 
 To update: download both assets from a newer release, replace them
-together, refresh these lines, and bump VENDORED_ABI in index.html.
+together, refresh these lines, and bump VENDORED_ABI in teec.js.
