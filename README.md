@@ -123,8 +123,8 @@ teec.destroy();
   the cone with its cross-section centred) aims the camera with north up,
   `az`/`el` do the same in radians, `roll` twists about the view axis,
   `dist` is the camera distance (1.8 to 14; the home view is 4). `'home'`
-  resets everything. An `'axis'` view given at mount is aimed once the
-  first solve lands.
+  resets everything. An `'axis'` view asked for before there is a
+  solution (at mount, say) is applied once the next solve lands.
 - `interaction` is fixed at mount. `edit` covers dragging points,
   shift-click to add, and double-click to delete. `keys` is `true` for the
   focusable canvas, or an `EventTarget` (say `window`) to listen on instead.
