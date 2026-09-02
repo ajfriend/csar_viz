@@ -101,7 +101,7 @@ import { mount, preset } from 'https://ajfriend.com/csar_viz/teec.js';
 const teec = mount(canvas, {
   points: [[lng, lat], ...],          // degrees; or unit vectors as {x,y,z} / [x,y,z]
   view: { center: 'points', dist: 2.7 },
-  show: { sphere: true, hull: true, gno: false, rays: false, land: false },
+  show: { cone: true, rim: true, axis: true, hull: true, sphere: true, gno: false, rays: false, land: false },
   interaction: { drag: true, zoom: true, keys: true, edit: true },   // fixed at mount
   onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, sol.halfAngle, ...
   onKey: e => {},                     // keys the diagram does not use
@@ -125,6 +125,11 @@ teec.destroy();
   `dist` is the camera distance (1.8 to 14; the home view is 4). `'home'`
   resets everything. An `'axis'` view asked for before there is a
   solution (at mount, say) is applied once the next solve lands.
+- `show` toggles the overlays: `cone` (surface, rulings, apex), `rim` (its
+  cross-section on the sphere, the spherical ellipse), `axis` (the arrow
+  along b), `hull`, `sphere`, `land`, `gno`, `rays`. Points and the cone
+  problem are always drawn. For a slide that wants only the points and
+  the ellipse: `show: { cone: false, axis: false, hull: false }`.
 - `interaction` is fixed at mount. `edit` covers dragging points,
   shift-click to add, and double-click to delete. `keys` is `true` for the
   focusable canvas, or an `EventTarget` (say `window`) to listen on instead.
@@ -147,7 +152,7 @@ to the diagram (the page passes them through to the library):
 
     ?embed              hide the sidebar, hint, and back link; the canvas fills the page
     ?preset=strip       initial point set: strip | quad | cap | rand
-    ?show=gno,rays      overlay toggles, comma-separated: sphere land gno rays hull
+    ?show=gno,rays      overlay toggles, comma-separated: cone rim axis hull sphere land gno rays
                         (listed ones on, the rest off; omit to keep the defaults)
     ?dist=2.8           initial camera distance (default 4; smaller is a bigger globe)
 

@@ -236,7 +236,8 @@ export function load() {
 /** Mount the diagram on a canvas. Options are documented at the top of this file. */
 export function mount(canvas, opts = {}) {
 const cv = canvas, ctx = cv.getContext('2d');
-const show = { sphere: true, land: false, gno: false, rays: false, hull: true, ...opts.show };
+const show = { sphere: true, land: false, gno: false, rays: false, hull: true,
+               cone: true, rim: true, axis: true, ...opts.show };
 const { drag = true, zoom = true, keys = true, edit = true } = opts.interaction ?? {};
 const ac = new AbortController(), signal = ac.signal;   // every listener detaches on destroy()
 const cam = { ...HOME };
@@ -416,13 +417,16 @@ function coneRim(S, N) {
   return { rim: out, halfAngle: th, n };
 }
 
+// The cone's surface and rulings (show.cone) and its rim (show.rim): the
+// rim is the cone's cross-section, on the sphere or, with the gnomonic
+// plane shown, on that plane.
 function drawCone(S) {
   const { rim } = coneRim(S, 128);
   const gno = show.gno;
   // ruling length: out to the tangent plane bᵀx = 1 when it is shown, else to the sphere
   const ext = d => gno ? scl(d, 1 / Math.max(dot(S.b, d), 1e-6)) : d;
   const O = V(0, 0, 0);
-  for (let k = 0; k < rim.length; k++) {
+  if (show.cone) for (let k = 0; k < rim.length; k++) {
     const d0 = rim[k], d1 = rim[(k + 1) % rim.length];
     const p0 = ext(d0), p1 = ext(d1);
     let nrm = nz(cross(d0, d1));
@@ -438,11 +442,11 @@ function drawCone(S) {
     pushPoly([O, p0, p1], `rgba(${r},${g},${bl},${front ? 0.34 : 0.14})`, null, 0);
   }
   const rimCol = gno ? 'rgba(194,98,10,0.95)' : 'rgba(10,116,106,0.95)';
-  for (let k = 0; k < rim.length; k++) {              // rim curve = the cross-section
+  if (show.rim) for (let k = 0; k < rim.length; k++) {   // rim curve = the cross-section
     const p0 = ext(rim[k]), p1 = ext(rim[(k + 1) % rim.length]);
     pushLine(p0, p1, rimCol, 2.2);
   }
-  for (let k = 0; k < rim.length; k += 16)            // a few rulings for structure
+  if (show.cone) for (let k = 0; k < rim.length; k += 16)   // a few rulings for structure
     pushLine(O, ext(rim[k]), 'rgba(13,148,136,0.30)', 1);
 }
 
@@ -620,7 +624,8 @@ function draw() {
     if (show.gno) drawGnomonic(sol);
     if (show.rays) for (const x of X)
       pushLine(V(0,0,0), scl(x, 1 / Math.max(dot(sol.b, x), 1e-6)), 'rgba(90,104,128,0.28)', 1);
-    // axis b
+  }
+  if (sol && sol.ok && show.axis) {
     const tip = sol.b;                                   // unit length: b is already normalised
     pushLine(V(0, 0, 0), tip, '#3b6fd4', 2.4);
     const [a1, a2] = frameOf(sol.b), back = scl(sol.b, -0.046), rad = 0.016;
@@ -637,7 +642,7 @@ function draw() {
     const act = sol && sol.ok && onBoundary(sol, x);
     pushDot(x, act ? 5.2 : 4.2, act ? '#c2620a' : '#8a94a6', '#ffffff', 1.6);
   }
-  pushDot(V(0, 0, 0), 2.6, '#5a6478', '#ffffff', 1);         // apex
+  if (show.cone) pushDot(V(0, 0, 0), 2.6, '#5a6478', '#ffffff', 1);   // apex
 
   prims.sort((a, b) => b.z - a.z);
   for (const p of prims) p.f();
