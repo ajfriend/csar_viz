@@ -31,6 +31,8 @@
   #back { position: absolute; right: 14px; top: 12px; color: var(--dim); font-size: 11.5px;
     text-decoration: none; }
   #back:hover { color: var(--accent); }
+  /* ?embed — just the diagram, for iframing (e.g. into a slide deck). */
+  html.embed aside, html.embed #hint, html.embed #back { display: none; }
   aside { width: 340px; flex: 0 0 340px; background: var(--panel); border-left: 1px solid var(--line);
     padding: 18px 18px 28px; overflow-y: auto; height: 100%; }
   h1 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
@@ -60,6 +62,11 @@
   @media (max-width: 860px) { body { flex-direction: column; overflow: auto; }
     #stage { height: 60vh; flex: none; } aside { width: 100%; flex: none; height: auto; border: none; } }
 </style>
+<script>
+  // Before first paint, so the sidebar never flashes in embed mode.
+  if (new URLSearchParams(location.search).has('embed'))
+    document.documentElement.classList.add('embed');
+</script>
 </head>
 <body>
 
@@ -818,7 +825,18 @@ ui('resetCam').onclick = () => { cam.az = 0.85; cam.el = 0.42; setDist(4.0); };
 for (const id of ['cSphere', 'cLand', 'cGno', 'cRays', 'cHull']) ui(id).addEventListener('change', draw);
 window.addEventListener('resize', resize);
 
-preset('strip');
+/* URL parameters, for embedding:
+     ?embed             hide the sidebar, hint, and back link; canvas fills the page
+     ?preset=strip      initial point set: strip | quad | cap | rand
+     ?show=gno,rays     overlay toggles, comma-separated: sphere land gno rays hull
+                        (listed ones on, the rest off; omit to keep the defaults) */
+const params = new URLSearchParams(location.search);
+preset(params.get('preset') || 'strip');
+if (params.has('show')) {
+  const on = new Set(params.get('show').split(',').map(t => t.trim()).filter(Boolean));
+  for (const k of ['Sphere', 'Land', 'Gno', 'Rays', 'Hull'])
+    ui('c' + k).checked = on.has(k.toLowerCase());
+}
 resize();
 
 // Paint the sphere first, then load the solver. The panel says so on

@@ -87,6 +87,20 @@ The controls are the points. Drag them on the unit sphere and the page re-solves
 from scratch (~3 ms), drawing the resulting cone, its rim on the sphere, and the
 support set (the points that end up on the cone boundary).
 
+## Embedding it elsewhere
+
+Query parameters on `index.html` strip the page down to the diagram so it can
+be iframed (a slide deck, a blog post):
+
+    ?embed              hide the sidebar, hint, and back link; the canvas fills the page
+    ?preset=strip       initial point set: strip | quad | cap | rand
+    ?show=gno,rays      overlay toggles, comma-separated: sphere land gno rays hull
+                        (listed ones on, the rest off; omit to keep the defaults)
+
+For example `index.html?embed&preset=quad&show=sphere,hull,gno`. Interaction
+(orbit, zoom, drag points, shift-click to add, double-click to delete) still
+works in embed mode; only the chrome is gone.
+
 ## How it solves it in the browser
 
 It runs **csar itself**, compiled to `wasm32-freestanding`. The page loads
