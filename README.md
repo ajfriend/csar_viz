@@ -118,10 +118,13 @@ teec.destroy();
   vectors as `[x, y, z]` / `{x, y, z}`. `preset('strip' | 'quad' | 'cap' |
   'rand')` gives the page's demo sets.
 - `view` applies what it has over a base (the home view at mount, the
-  current view in `setView`): `center` (a point, or `'points'` for the
-  centroid) aims the camera with north up, `az`/`el` do the same in
-  radians, `roll` twists about the view axis, `dist` is the camera
-  distance (1.8 to 14; the home view is 4). `'home'` resets everything.
+  current view in `setView`): `center` (a point, `'points'` for the
+  centroid, or `'axis'` for the solved cone's axis, looking straight down
+  the cone with its cross-section centred) aims the camera with north up,
+  `az`/`el` do the same in radians, `roll` twists about the view axis,
+  `dist` is the camera distance (1.8 to 14; the home view is 4). `'home'`
+  resets everything. An `'axis'` view asked for before there is a
+  solution (at mount, say) is applied once the next solve lands.
 - `interaction` is fixed at mount. `edit` covers dragging points,
   shift-click to add, and double-click to delete. `keys` is `true` for the
   focusable canvas, or an `EventTarget` (say `window`) to listen on instead.

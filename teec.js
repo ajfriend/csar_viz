@@ -152,17 +152,21 @@ const HOME = { ...frameAt(azel(HOME_AZ, HOME_EL)), dist: 4.0 };
 // here, so the bounds cannot drift apart per input device.
 const clampDist = d => Math.min(14, Math.max(1.8, d));
 /* A view spec -> camera fields. 'home' (or nothing) is HOME. An object
-   starts from `base` (HOME at mount, the current view in setView) and
-   applies what it has: `center` (a point spelling, or 'points' for the
-   centroid of X) aims the camera with north up; `az`/`el` (radians) do the
-   same in spherical terms; `roll` (radians) twists about the view axis;
-   `dist` sets the distance. */
-export function viewFrame(spec, X = [], base = HOME) {
+   starts from `base` and applies what it has: `center` (a point spelling,
+   'points' for the centroid of X, or 'axis' for the solved cone's axis b)
+   aims the camera with north up; `az`/`el` (radians) do the same in
+   spherical terms; `roll` (radians) twists about the view axis; `dist`
+   sets the distance. An aim whose target is missing (no points, no
+   solution yet) is left alone; see needsSolution. */
+export function viewFrame(spec, X = [], base = HOME, sol = null) {
   if (!spec || spec === 'home') return { ...HOME };
   const v = { ...base };
-  if (spec.center === 'points') { if (X.length) Object.assign(v, frameAt(centroid(X))); }
-  else if (spec.center != null) Object.assign(v, frameAt(toXyz(spec.center)));
-  else if (spec.az != null || spec.el != null) Object.assign(v, frameAt(azel(spec.az ?? HOME_AZ, spec.el ?? HOME_EL)));
+  const at = spec.center === 'axis'   ? (sol?.ok ? sol.b : null)
+           : spec.center === 'points' ? (X.length ? centroid(X) : null)
+           : spec.center != null      ? toXyz(spec.center)
+           : spec.az != null || spec.el != null ? azel(spec.az ?? HOME_AZ, spec.el ?? HOME_EL)
+           : null;
+  if (at) Object.assign(v, frameAt(at));
   if (spec.roll) { v.right = rot(v.right, v.back, spec.roll); v.up = cross(v.back, v.right); }
   if (spec.dist != null) v.dist = clampDist(spec.dist);
   return v;
@@ -255,8 +259,21 @@ const setDist = d => {
 };
 let X = [], sol = null, W = 0, H = 0, dpr = 1, focal = 1, solverReady = false;
 
+/* A view that aims at the solution cannot be applied before there is one:
+   applyView applies what it can now and parks the spec (with the base it
+   was asked to apply over) until the next successful solve. */
+const needsSolution = spec => spec?.center === 'axis';
+let pendingView = null;   // { spec, base }
+const applyView = (spec, base = cam) => {
+  const b = { ...base };
+  Object.assign(cam, viewFrame(spec, X, b, sol));
+  pendingView = needsSolution(spec) && !sol?.ok ? { spec, base: b } : null;
+};
 function recompute() {
-  if (solverReady) { sol = solve(X); opts.onSolve?.(sol, X); }
+  if (solverReady) {
+    sol = solve(X); opts.onSolve?.(sol, X);
+    if (pendingView) applyView(pendingView.spec, pendingView.base);
+  }
   draw();
 }
 
@@ -753,7 +770,7 @@ else if (keys) keys.addEventListener('keydown', onKey, { signal });
 cv.style.touchAction = 'none';   // else a one-finger drag becomes a page scroll mid-gesture
 setCursor(idleCursor);
 X = (opts.points ?? preset('strip')).map(toXyz);
-Object.assign(cam, viewFrame(opts.view, X));
+applyView(opts.view, HOME);
 // The observer follows the layout box; the window listener catches an
 // ancestor transform changing with it (reveal.js rescaling its slides).
 const ro = new ResizeObserver(resize);
@@ -775,7 +792,7 @@ return {
   get show() { return { ...show }; },
   setPoints(pts) { X = pts.map(toXyz); recompute(); },
   /** 'home', or { center | az/el, roll, dist } applied over the current view; see viewFrame. */
-  setView(spec) { Object.assign(cam, viewFrame(spec, X, cam)); schedule('draw'); },
+  setView(spec) { applyView(spec); schedule('draw'); },
   setShow(flags) { Object.assign(show, flags); schedule('draw'); },
   destroy() { ac.abort(); ro.disconnect(); if (rafId) cancelAnimationFrame(rafId); },
 };
