@@ -1,11 +1,14 @@
 # csar_viz — interactive views of the ellipsoidal cone
 
-Two pages, no build step:
+No build step:
 
-- `index.html` — 3D. You set the *points*, and it solves the TEEC problem for
-  them, running the real solver as WebAssembly (`vendor/`, see below). ES
-  modules and wasm need http, so serve the directory rather than opening the
-  file: `python3 -m http.server`.
+- `teec.js` — the 3D diagram as a library: the unit sphere, a point set on
+  it, and the tightest enclosing ellipsoidal cone, solved by the real solver
+  as WebAssembly (`vendor/`, see below). Mount it on any canvas; see
+  "Using it as a library" below.
+- `index.html` — the full 3D page, built on `teec.js`: you set the *points*
+  and read the solution off the sidebar. ES modules and wasm need http, so
+  serve the directory rather than opening the file: `python3 -m http.server`.
 - `playground.html` — 2D playground, self-contained and dependency-free. You
   set `A` and `b` by hand and watch `C(A, b)`.
 
@@ -87,10 +90,52 @@ The controls are the points. Drag them on the unit sphere and the page re-solves
 from scratch (~3 ms), drawing the resulting cone, its rim on the sphere, and the
 support set (the points that end up on the cone boundary).
 
+## Using it as a library
+
+`teec.js` is a plain ES module with no dependencies beyond `vendor/`. It is
+served with this page, so another site can import it straight from here:
+
+```js
+import { mount, preset } from 'https://ajfriend.com/csar_viz/teec.js';
+
+const teec = mount(canvas, {
+  points: [[lng, lat], ...],          // degrees; or unit vectors as {x,y,z} / [x,y,z]
+  view: { center: 'points', dist: 2.7 },
+  show: { sphere: true, hull: true, gno: false, rays: false, land: false },
+  interaction: { drag: true, zoom: true, keys: true, edit: true },
+  background: '#fff',                 // omit for transparent
+  onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, ...
+  onKey: e => {},                     // keys the diagram does not use
+});
+await teec.ready;                     // the solver is loaded and the first solve drawn
+teec.setPoints(preset('quad'));
+teec.setView({ dist: 3 });            // or 'home', or { center: [lng, lat], roll }
+teec.setShow({ gno: true });
+teec.destroy();
+```
+
+- `points` accepts `[lng, lat]` pairs in degrees, `{lng, lat}`, or unit
+  vectors as `[x, y, z]` / `{x, y, z}`. `preset('strip' | 'quad' | 'cap' |
+  'rand')` gives the page's demo sets.
+- `view` starts from the home view and applies what it has: `center` (a
+  point, or `'points'` for the centroid) aims the camera with north up,
+  `az`/`el` do the same in radians, `roll` twists about the view axis,
+  `dist` is the camera distance (1.8 to 14; the home view is 4).
+- `interaction.edit` covers dragging points, shift-click to add, and
+  double-click to delete. `interaction.keys` is `true` for the focusable
+  canvas, or an `EventTarget` (say `window`) to listen on instead.
+- The canvas is sized from its CSS layout box and follows it with a
+  `ResizeObserver`; a CSS transform on an ancestor (reveal.js scales its
+  slides) is folded into the pixel ratio and the pointer math, so it stays
+  crisp and draggable inside a scaled slide.
+- One wasm instance per page, loaded on first mount (`load()` is exported
+  too). `ready` rejects if the wasm cannot be fetched or the vendored pair
+  mismatches.
+
 ## Embedding it elsewhere
 
-Query parameters on `index.html` strip the page down to the diagram so it can
-be iframed (a slide deck, a blog post):
+For an iframe instead, query parameters on `index.html` strip the page down
+to the diagram (the page passes them through to the library):
 
     ?embed              hide the sidebar, hint, and back link; the canvas fills the page
     ?preset=strip       initial point set: strip | quad | cap | rand
