@@ -236,7 +236,8 @@ export function load() {
 /** Mount the diagram on a canvas. Options are documented at the top of this file. */
 export function mount(canvas, opts = {}) {
 const cv = canvas, ctx = cv.getContext('2d');
-const show = { sphere: true, land: false, gno: false, rays: false, hull: true, ...opts.show };
+const show = { sphere: true, land: false, gno: false, rays: false, hull: true,
+               cone: true, rim: true, axis: true, ...opts.show };
 const { drag = true, zoom = true, keys = true, edit = true } = opts.interaction ?? {};
 const ac = new AbortController(), signal = ac.signal;   // every listener detaches on destroy()
 const cam = { ...HOME };
@@ -416,11 +417,13 @@ function coneRim(S, N) {
   return { rim: out, halfAngle: th, n };
 }
 
+// With the gnomonic plane shown, the cone extends to the plane bᵀx = 1 and
+// its rim is drawn there; otherwise both stop at the sphere.
+const extent = S => show.gno ? (d => scl(d, 1 / Math.max(dot(S.b, d), 1e-6))) : (d => d);
+
+// The cone's surface, a few rulings, and the apex.
 function drawCone(S) {
-  const { rim } = coneRim(S, 128);
-  const gno = show.gno;
-  // ruling length: out to the tangent plane bᵀx = 1 when it is shown, else to the sphere
-  const ext = d => gno ? scl(d, 1 / Math.max(dot(S.b, d), 1e-6)) : d;
+  const { rim } = coneRim(S, 128), ext = extent(S);
   const O = V(0, 0, 0);
   for (let k = 0; k < rim.length; k++) {
     const d0 = rim[k], d1 = rim[(k + 1) % rim.length];
@@ -437,13 +440,30 @@ function drawCone(S) {
       Math.round(Math.max(0, Math.min(255, c * (front ? sh : sh * 1.25)))));
     pushPoly([O, p0, p1], `rgba(${r},${g},${bl},${front ? 0.34 : 0.14})`, null, 0);
   }
-  const rimCol = gno ? 'rgba(194,98,10,0.95)' : 'rgba(10,116,106,0.95)';
-  for (let k = 0; k < rim.length; k++) {              // rim curve = the cross-section
-    const p0 = ext(rim[k]), p1 = ext(rim[(k + 1) % rim.length]);
-    pushLine(p0, p1, rimCol, 2.2);
-  }
   for (let k = 0; k < rim.length; k += 16)            // a few rulings for structure
     pushLine(O, ext(rim[k]), 'rgba(13,148,136,0.30)', 1);
+  pushDot(O, 2.6, '#5a6478', '#ffffff', 1);           // apex
+}
+
+// The cone's rim: its cross-section, the spherical ellipse through the support points.
+function drawRim(S) {
+  const { rim } = coneRim(S, 128), ext = extent(S);
+  const col = show.gno ? 'rgba(194,98,10,0.95)' : 'rgba(10,116,106,0.95)';
+  for (let k = 0; k < rim.length; k++)
+    pushLine(ext(rim[k]), ext(rim[(k + 1) % rim.length]), col, 2.2);
+}
+
+// The axis b, as an arrow from the apex to the sphere.
+function drawAxis(S) {
+  const tip = S.b;                                     // unit length: b is already normalised
+  pushLine(V(0, 0, 0), tip, '#3b6fd4', 2.4);
+  const [a1, a2] = frameOf(S.b), back = scl(S.b, -0.046), rad = 0.016;
+  for (let k = 0; k < 12; k++) {                       // arrowhead
+    const t0 = 2*Math.PI*k/12, t1 = 2*Math.PI*(k+1)/12;
+    const r0 = add(add(tip, back), add(scl(a1, rad*Math.cos(t0)), scl(a2, rad*Math.sin(t0))));
+    const r1 = add(add(tip, back), add(scl(a1, rad*Math.cos(t1)), scl(a2, rad*Math.sin(t1))));
+    pushPoly([tip, r0, r1], 'rgba(59,111,212,0.95)', null, 0);
+  }
 }
 
 function drawGnomonic(S) {
@@ -615,21 +635,13 @@ function draw() {
   if (show.land) drawLand();
 
   if (sol && sol.ok) {
-    drawCone(sol);
+    if (show.cone) drawCone(sol);
+    if (show.rim) drawRim(sol);
+    if (show.axis) drawAxis(sol);
     if (show.hull) drawHull(sol);
     if (show.gno) drawGnomonic(sol);
     if (show.rays) for (const x of X)
       pushLine(V(0,0,0), scl(x, 1 / Math.max(dot(sol.b, x), 1e-6)), 'rgba(90,104,128,0.28)', 1);
-    // axis b
-    const tip = sol.b;                                   // unit length: b is already normalised
-    pushLine(V(0, 0, 0), tip, '#3b6fd4', 2.4);
-    const [a1, a2] = frameOf(sol.b), back = scl(sol.b, -0.046), rad = 0.016;
-    for (let k = 0; k < 12; k++) {                       // arrowhead
-      const t0 = 2*Math.PI*k/12, t1 = 2*Math.PI*(k+1)/12;
-      const r0 = add(add(tip, back), add(scl(a1, rad*Math.cos(t0)), scl(a2, rad*Math.sin(t0))));
-      const r1 = add(add(tip, back), add(scl(a1, rad*Math.cos(t1)), scl(a2, rad*Math.sin(t1))));
-      pushPoly([tip, r0, r1], 'rgba(59,111,212,0.95)', null, 0);
-    }
   }
 
   for (let i = 0; i < X.length; i++) {
@@ -637,7 +649,6 @@ function draw() {
     const act = sol && sol.ok && onBoundary(sol, x);
     pushDot(x, act ? 5.2 : 4.2, act ? '#c2620a' : '#8a94a6', '#ffffff', 1.6);
   }
-  pushDot(V(0, 0, 0), 2.6, '#5a6478', '#ffffff', 1);         // apex
 
   prims.sort((a, b) => b.z - a.z);
   for (const p of prims) p.f();
