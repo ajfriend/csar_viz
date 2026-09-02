@@ -267,6 +267,7 @@ function rotateCam(axis, t) {
   cam.back = nz(cam.back);
   cam.right = nz(sub(cam.right, scl(cam.back, dot(cam.right, cam.back))));
   cam.up = cross(cam.back, cam.right);
+  B = basis();   // so a follow-up unproject in the same event sees the new view
   schedule('draw');
 }
 const spin = t => rotateCam(cam.up, t);      // about the screen vertical
@@ -742,6 +743,7 @@ function readout() {
 
 /* =======================  interaction  ======================= */
 let mode = null, dragIdx = -1;
+let grab = null;   // orbit: the sphere point under the cursor at pointerdown (world)
 
 // Input can outpace the display, and work done between two frames is never
 // seen. Fold it: state updates stay synchronous, the expensive tail runs once
@@ -791,7 +793,7 @@ cv.addEventListener('pointerdown', e => {
 
   const i = pickPoint(px, py);
   if (e.shiftKey && i < 0) { X.push(hitSphere(px, py)); recompute(); return; }
-  if (i >= 0) { mode = 'pt'; dragIdx = i; } else { mode = 'orbit'; }
+  if (i >= 0) { mode = 'pt'; dragIdx = i; } else { mode = 'orbit'; grab = hitSphere(px, py); }
   cv.classList.add('dragging');
 });
 cv.addEventListener('pointermove', e => {
@@ -807,9 +809,15 @@ cv.addEventListener('pointermove', e => {
     return;
   }
   if (mode === 'orbit' && prev) {
-    // Content follows the pointer: a drag right spins the frame the other way.
-    spin(-(px - prev.x) * 0.008);
-    tilt(-(py - prev.y) * 0.008);
+    // Arcball: the sphere point grabbed at pointerdown stays under the
+    // cursor. Rotate the camera by the rotation taking the point now under
+    // the cursor back onto the grabbed one; past the rim hitSphere gives
+    // the nearest point, so the globe keeps rolling instead of sticking.
+    if (!grab) grab = hitSphere(prev.x, prev.y);
+    const here = hitSphere(px, py);
+    const ax = cross(here, grab), sn = len(ax), cs = dot(here, grab);
+    if (sn > 1e-9) rotateCam(scl(ax, 1 / sn), Math.atan2(sn, cs));
+    grab = hitSphere(px, py);   // re-anchor: exact on a hit, nearest point past the rim
   } else if (mode === 'pt') {
     X[dragIdx] = hitSphere(px, py);
     schedule('solve');
@@ -823,8 +831,8 @@ const end = e => {
   // Lifting one finger of a pinch leaves the other still down: orbit
   // from wherever it is. Its map entry is already its current
   // position, so the next move measures from there and cannot jump.
-  if (active.size === 1) { mode = 'orbit'; return; }
-  mode = null; dragIdx = -1; cv.classList.remove('dragging');
+  if (active.size === 1) { mode = 'orbit'; grab = null; return; }
+  mode = null; dragIdx = -1; grab = null; cv.classList.remove('dragging');
 };
 cv.addEventListener('pointerup', end);
 cv.addEventListener('pointercancel', end);
