@@ -102,35 +102,40 @@ const teec = mount(canvas, {
   points: [[lng, lat], ...],          // degrees; or unit vectors as {x,y,z} / [x,y,z]
   view: { center: 'points', dist: 2.7 },
   show: { sphere: true, hull: true, gno: false, rays: false, land: false },
-  interaction: { drag: true, zoom: true, keys: true, edit: true },
-  background: '#fff',                 // omit for transparent
-  onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, ...
+  interaction: { drag: true, zoom: true, keys: true, edit: true },   // fixed at mount
+  onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, sol.halfAngle, ...
   onKey: e => {},                     // keys the diagram does not use
 });
 await teec.ready;                     // the solver is loaded and the first solve drawn
 teec.setPoints(preset('quad'));
-teec.setView({ dist: 3 });            // or 'home', or { center: [lng, lat], roll }
+teec.setView({ dist: 3 });            // applied over the current view; 'home' resets
 teec.setShow({ gno: true });
+teec.points; teec.solution; teec.show;   // copies of the current state
 teec.destroy();
 ```
 
 - `points` accepts `[lng, lat]` pairs in degrees, `{lng, lat}`, or unit
   vectors as `[x, y, z]` / `{x, y, z}`. `preset('strip' | 'quad' | 'cap' |
   'rand')` gives the page's demo sets.
-- `view` starts from the home view and applies what it has: `center` (a
-  point, or `'points'` for the centroid) aims the camera with north up,
-  `az`/`el` do the same in radians, `roll` twists about the view axis,
-  `dist` is the camera distance (1.8 to 14; the home view is 4).
-- `interaction.edit` covers dragging points, shift-click to add, and
-  double-click to delete. `interaction.keys` is `true` for the focusable
-  canvas, or an `EventTarget` (say `window`) to listen on instead.
-- The canvas is sized from its CSS layout box and follows it with a
-  `ResizeObserver`; a CSS transform on an ancestor (reveal.js scales its
-  slides) is folded into the pixel ratio and the pointer math, so it stays
-  crisp and draggable inside a scaled slide.
+- `view` applies what it has over a base (the home view at mount, the
+  current view in `setView`): `center` (a point, or `'points'` for the
+  centroid) aims the camera with north up, `az`/`el` do the same in
+  radians, `roll` twists about the view axis, `dist` is the camera
+  distance (1.8 to 14; the home view is 4). `'home'` resets everything.
+- `interaction` is fixed at mount. `edit` covers dragging points,
+  shift-click to add, and double-click to delete. `keys` is `true` for the
+  focusable canvas, or an `EventTarget` (say `window`) to listen on instead.
+- The canvas is transparent; paint the background behind it in CSS. It is
+  sized from its CSS layout box and follows it with a `ResizeObserver`; a
+  CSS transform on an ancestor (reveal.js scales its slides) is folded into
+  the pixel ratio and the pointer math, so it stays crisp and draggable
+  inside a scaled slide.
 - One wasm instance per page, loaded on first mount (`load()` is exported
   too). `ready` rejects if the wasm cannot be fetched or the vendored pair
   mismatches.
+- Also exported, for building a page around the diagram: `lnglatToXyz`,
+  `toXyz`, `centroid`, `pointNear`, `viewFrame`, and `slack` /
+  `onBoundary` for reading a solution's residuals, as `index.html` does.
 
 ## Embedding it elsewhere
 

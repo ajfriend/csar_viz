@@ -4,22 +4,13 @@
    cone enclosing the points, solved by csar (vendor/, as WebAssembly).
 
      import { mount, preset } from './teec.js';
-     const teec = mount(canvas, {
-       points: [[lng, lat], ...],          // degrees; or unit-vector {x,y,z} / [x,y,z]
-       view: { center: 'points', dist: 2.7 },
-       show: { sphere: true, hull: true, gno: false, rays: false, land: false },
-       interaction: { drag: true, zoom: true, keys: true, edit: true },
-       background: '#fff',                 // omit for transparent
-       onSolve: (sol, points) => {},       // after every solve
-       onKey: e => {},                     // keys the diagram does not use
-     });
+     const teec = mount(canvas, { points: preset('strip'), view: { dist: 2.7 } });
      await teec.ready;
-     teec.setPoints(preset('quad')); teec.setView({ dist: 3 }); teec.setShow({ gno: true });
 
-   ESM + wasm need http: serve the directory rather than opening files directly.
-   index.html is the full page built on this; README.md documents both. */
+   Options, the handle, and the exports are documented in README.md under
+   "Using it as a library". ESM + wasm need http: serve the directory rather
+   than opening files directly. index.html is the full page built on this. */
 import { init, solve as csarSolve, versions } from './vendor/csar.js';
-export { versions };
 
 /* =======================  linear algebra  ======================= */
 const V = (x, y, z) => ({ x, y, z });
@@ -33,31 +24,26 @@ const nz = a => scl(a, 1 / (len(a) || 1));
 const mv = (M, x) => V(M[0]*x.x + M[1]*x.y + M[2]*x.z,
                        M[3]*x.x + M[4]*x.y + M[5]*x.z,
                        M[6]*x.x + M[7]*x.y + M[8]*x.z);
-export { V, dot, add, sub, scl, cross, len, nz, mv };
-
 /* =======================  the solver  =======================
    csar itself as wasm. vendor/csar.js is the ABI's own JavaScript
    declaration — the status codes and the result-struct offsets live
    there, gated against the solver's C ABI upstream, not transcribed
    here. (One exception, marked below: the no-certificate gap
    sentinel, which the ABI does not yet name.)
-
-   ESM + wasm need http, so serve this directory rather than opening
-   the file directly:  python3 -m http.server
    ============================================================== */
 
 // csar_zig's GAP_UNCERTIFIED (src/config.zig): "no certificate could
 // be constructed", so Q and sigma carry no information. It reaches us
 // unchanged through the ABI but has no CSAR_* name yet, so this is the
-// one solver constant the page still spells out. Filed upstream.
-// vendor/ is a matched pair from this csar_abi release; boot checks
+// one solver constant this module still spells out. Filed upstream.
+// vendor/ is a matched pair from this csar_abi release; load() checks
 // the module agrees. See vendor/PROVENANCE.
-export const VENDORED_ABI = '0.2.0';
+const VENDORED_ABI = '0.2.0';
 
 const GAP_UNCERTIFIED = 1e30;
 
 // The cross-section budget that pins sigma[0] = 1/sqrt(3). Geometry,
-// not a knob (csar_zig's config.zig says so); the page derives the
+// not a knob (csar_zig's config.zig says so); the renderer derives the
 // cross-section ellipse from it.
 const TAU = 2 / 3;
 
@@ -67,7 +53,7 @@ function solve(X) {
     r = csarSolve(X.map(p => [p.x, p.y, p.z]));
   } catch (e) {
     // A nonzero call code: the solve could not run at all. csar.js
-    // formats these; strip its prefix for the panel's voice.
+    // formats these; strip its prefix for the caller.
     return { ok: false, why: e.message.replace(/^csar: /, '') };
   }
 
@@ -104,13 +90,17 @@ function solve(X) {
   // primal residual, which is an absolute test on a quantity that scales with A.
   // Only a certified outcome has them; uncertified ones show none.
   const lam = r.lambdas ?? new Float64Array(X.length);
-  return { ok: true, b, A, Ai, H, v: { x: 0, y: 0 }, f1, f2, P, sig,
+  // Half-angle of the round cone through the rim (see coneRim): from |A⁻¹b|.
+  const halfAngle = Math.acos(Math.min(1, 1 / len(mv(Ai, b))));
+  return { ok: true, b, A, Ai, H, v: { x: 0, y: 0 }, f1, f2, P, sig, halfAngle,
            gap: r.gap, floor: r.gap_floor, outer: r.iters, lam,
            aspect: r.aspectRatio, status: r.status,
            uncertified: r.status !== 'converged',
            negLogDet: -(Math.log(sig[0]) + Math.log(sig[1]) + Math.log(sig[2])) };
 }
 
+/** Primal slack ||Ax|| − bᵀx of a point against a solution: ≤ 0 inside the cone. */
+export const slack = (S, x) => len(mv(S.A, x)) - dot(S.b, x);
 // A point lies on the cone boundary when ||Ax|| = b'x. Compare the slack
 // RELATIVE to b'x: ||Ax|| carries A's scale, which ranges over many orders of
 // magnitude, so an absolute tolerance silently drops boundary points on some
@@ -118,10 +108,10 @@ function solve(X) {
 // with cocircular points the optimal weights are not unique.
 export function onBoundary(S, x) {
   const d = dot(S.b, x);
-  return d > 0 && (d - len(mv(S.A, x))) / d < 1e-6;
+  return d > 0 && -slack(S, x) / d < 1e-6;
 }
 
-export function frameOf(b) {
+function frameOf(b) {
   const t = Math.abs(b.z) < 0.9 ? V(0, 0, 1) : V(1, 0, 0);
   const f1 = nz(cross(t, b));
   return [f1, cross(b, f1)];
@@ -129,10 +119,16 @@ export function frameOf(b) {
 
 /* =======================  points and views  ======================= */
 const DEG = Math.PI / 180;
+/** Azimuth/elevation in radians -> unit vector (az 0 on +x, elevation +z). */
+const azel = (az, el) => V(Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), Math.sin(el));
 /** [lng, lat] in degrees -> unit vector (lng 0 on +x, north pole +z). */
-export function lnglatToXyz(lng, lat) {
-  const cl = Math.cos(lat * DEG);
-  return V(cl * Math.cos(lng * DEG), cl * Math.sin(lng * DEG), Math.sin(lat * DEG));
+export const lnglatToXyz = (lng, lat) => azel(lng * DEG, lat * DEG);
+/** Normalised sum of unit vectors: the spherical centroid. */
+export const centroid = P => nz(P.reduce((s, x) => add(s, x), V(0, 0, 0)));
+/** A unit vector at chord distance r from c, at angle a in c's tangent frame. */
+export function pointNear(c, r, a) {
+  const [u1, u2] = frameOf(c);
+  return nz(add(c, add(scl(u1, r * Math.cos(a)), scl(u2, r * Math.sin(a)))));
 }
 /** Any point spelling -> unit vector: [lng, lat] | {lng, lat} | [x, y, z] | {x, y, z}. */
 export function toXyz(p) {
@@ -149,23 +145,24 @@ const rot = (v, k, t) => {
 /* The camera is a free orthonormal frame (right, up, back) at distance
    dist along back: no azimuth/elevation, so no clamp at the poles and no
    gimbal lock. Drag and keys rotate the frame about its own axes. */
-const azel = (az, el) => V(Math.cos(el)*Math.cos(az), Math.cos(el)*Math.sin(az), Math.sin(el));
 const frameAt = back => { const [right, up] = frameOf(back); return { right, up, back }; };
-const HOME = { ...frameAt(azel(0.85, 0.42)), dist: 4.0 };   // looks at the preset cluster
+const HOME_AZ = 0.85, HOME_EL = 0.42;   // looks at the preset cluster
+const HOME = { ...frameAt(azel(HOME_AZ, HOME_EL)), dist: 4.0 };
 // The camera owns its own limits: wheel and pinch both zoom through
 // here, so the bounds cannot drift apart per input device.
 const clampDist = d => Math.min(14, Math.max(1.8, d));
 /* A view spec -> camera fields. 'home' (or nothing) is HOME. An object
-   starts from HOME and applies what it has: `center` (a point spelling,
-   or 'points' for the centroid of X) aims the camera with north up;
-   `az`/`el` (radians) do the same in spherical terms; `roll` (radians)
-   twists about the view axis; `dist` sets the distance. */
-export function viewFrame(spec, X = []) {
+   starts from `base` (HOME at mount, the current view in setView) and
+   applies what it has: `center` (a point spelling, or 'points' for the
+   centroid of X) aims the camera with north up; `az`/`el` (radians) do the
+   same in spherical terms; `roll` (radians) twists about the view axis;
+   `dist` sets the distance. */
+export function viewFrame(spec, X = [], base = HOME) {
   if (!spec || spec === 'home') return { ...HOME };
-  const v = { ...HOME };
-  if (spec.center === 'points' && X.length) Object.assign(v, frameAt(nz(X.reduce((s, x) => add(s, x), V(0, 0, 0)))));
-  else if (spec.center != null && spec.center !== 'points') Object.assign(v, frameAt(toXyz(spec.center)));
-  else if (spec.az != null || spec.el != null) Object.assign(v, frameAt(azel(spec.az ?? 0.85, spec.el ?? 0.42)));
+  const v = { ...base };
+  if (spec.center === 'points') { if (X.length) Object.assign(v, frameAt(centroid(X))); }
+  else if (spec.center != null) Object.assign(v, frameAt(toXyz(spec.center)));
+  else if (spec.az != null || spec.el != null) Object.assign(v, frameAt(azel(spec.az ?? HOME_AZ, spec.el ?? HOME_EL)));
   if (spec.roll) { v.right = rot(v.right, v.back, spec.roll); v.up = cross(v.back, v.right); }
   if (spec.dist != null) v.dist = clampDist(spec.dist);
   return v;
@@ -205,8 +202,7 @@ function coastData() {
     const out = [];
     let lon = +n[0], lat = +n[1];
     for (let i = 2; ; i += 2) {
-      const B = lat * D, L = lon * D;
-      out.push(V(Math.cos(B) * Math.cos(L), Math.cos(B) * Math.sin(L), Math.sin(B)));
+      out.push(azel(lon * D, lat * D));
       if (i >= n.length) break;
       lon += +n[i]; lat += +n[i + 1];
     }
@@ -215,9 +211,6 @@ function coastData() {
   return coastRings;
 }
 
-// Drawn as short polyline runs rather than one primitive per segment: 5119
-// segments would swamp the depth sort, while one primitive per ring would span
-// too much depth to sort correctly against the cone.
 /* =======================  the solver, once per page  ======================= */
 let loading = null;
 /** Load csar.wasm (relative to this module) once; resolves with its versions. */
@@ -263,8 +256,7 @@ const setDist = d => {
 let X = [], sol = null, W = 0, H = 0, dpr = 1, focal = 1, solverReady = false;
 
 function recompute() {
-  sol = solverReady ? solve(X) : null;
-  if (solverReady) opts.onSolve?.(sol, X);
+  if (solverReady) { sol = solve(X); opts.onSolve?.(sol, X); }
   draw();
 }
 
@@ -287,14 +279,18 @@ function hitSphere(px, py) {
 }
 
 /* =======================  renderer  ======================= */
+// On-screen px per layout px. A CSS transform on an ancestor (reveal.js
+// scales its slides) changes the on-screen size without changing the layout
+// size: fold it into the pixel ratio so the canvas stays crisp, and into the
+// pointer math (pxOf). Measured per call since a transform change fires
+// neither the ResizeObserver nor a layout.
+const layoutScale = () => cv.getBoundingClientRect().width / cv.clientWidth || 1;
 function resize() {
-  W = cv.clientWidth; H = cv.clientHeight;
-  if (!W || !H) return;   // not laid out yet (e.g. a hidden slide); the observer will call back
-  // A CSS transform on an ancestor (reveal.js scales its slides) changes the
-  // on-screen size without changing the layout size: fold it into the pixel
-  // ratio so the canvas stays crisp, and into pointer math (see pxOf).
-  const rect = cv.getBoundingClientRect();
-  dpr = (window.devicePixelRatio || 1) * (rect.width / W || 1);
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;   // not laid out yet (e.g. a hidden slide); the observer will call back
+  const d = (window.devicePixelRatio || 1) * layoutScale();
+  if (w === W && h === H && d === dpr) return;   // observer's initial callback, window resize with no change
+  W = w; H = h; dpr = d;
   cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   focal = 1.15 * Math.min(W, H);
@@ -326,6 +322,9 @@ const pushDot = (p, r, fill, stroke, lw) => {
 
 let LIGHT = nz(V(-0.4, -0.75, 0.75));   // key light, re-aimed over the viewer's shoulder each frame
 
+// Drawn as short polyline runs rather than one primitive per segment: 5119
+// segments would swamp the depth sort, while one primitive per ring would span
+// too much depth to sort correctly against the cone.
 function drawLand() {
   const CHUNK = 20;
   for (const ring of coastData()) {
@@ -364,11 +363,8 @@ function sphereWire() {
   // The clip lands exactly on the outermost minor parallel, so nothing dangles
   // past the last circle, and the four principal meridians still converge at the
   // poles the way they do on a real globe.
-  const D = Math.PI / 180, STEP = 10, MAJOR = 90, CLIP = 90 - STEP;
-  const at = (lon, lat) => {
-    const a = lon * D, b = lat * D;
-    return V(Math.cos(b) * Math.cos(a), Math.cos(b) * Math.sin(a), Math.sin(b));
-  };
+  const STEP = 10, MAJOR = 90, CLIP = 90 - STEP;
+  const at = lnglatToXyz;
   const run = (pts, w) => {
     for (let i = 0; i + 1 < pts.length; i++) {
       const q = project(pts[i]), r = project(pts[i + 1]);
@@ -393,7 +389,7 @@ function sphereWire() {
 // ĉ = A⁻¹b/‖A⁻¹b‖ with half-angle arccos(1/‖A⁻¹b‖); pull back through A⁻¹.
 function coneRim(S, N) {
   const c = mv(S.Ai, S.b), n = len(c), ch = scl(c, 1/n);
-  const th = Math.acos(Math.min(1, 1/n));
+  const th = S.halfAngle;
   const [e1, e2] = frameOf(ch), out = [];
   for (let k = 0; k < N; k++) {
     const ph = 2*Math.PI*k/N;
@@ -596,8 +592,7 @@ function drawHull(S) {
 function draw() {
   LIGHT = nz(add(add(scl(cam.right, -0.45), scl(cam.up, 0.55)), scl(cam.back, 0.70)));
   prims.length = 0;
-  ctx.clearRect(0, 0, W, H);
-  if (opts.background) { ctx.fillStyle = opts.background; ctx.fillRect(0, 0, W, H); }
+  ctx.clearRect(0, 0, W, H);   // transparent: the host paints behind the canvas
 
   if (show.sphere) sphereWire();
   if (show.land) drawLand();
@@ -669,10 +664,11 @@ const spread = () => {
 
 // Pointer position in canvas layout px (see resize for the transform note).
 const pxOf = e => {
-  const r = cv.getBoundingClientRect(), s = W / (r.width || W);
+  const r = cv.getBoundingClientRect(), s = 1 / layoutScale();
   return [(e.clientX - r.left) * s, (e.clientY - r.top) * s];
 };
 const setCursor = c => { cv.style.cursor = c; };
+const idleCursor = drag ? 'grab' : 'default';
 
 cv.addEventListener('pointerdown', e => {
   const [px, py] = pxOf(e);
@@ -714,7 +710,7 @@ cv.addEventListener('pointermove', e => {
     X[dragIdx] = hitSphere(px, py);
     schedule('solve');
   } else if (!mode) {
-    setCursor(edit && pickPoint(px, py) >= 0 ? 'pointer' : drag ? 'grab' : 'default');
+    setCursor(edit && pickPoint(px, py) >= 0 ? 'pointer' : idleCursor);
   }
 }, { signal });
 const end = e => {
@@ -724,7 +720,7 @@ const end = e => {
   // from wherever it is. Its map entry is already its current
   // position, so the next move measures from there and cannot jump.
   if (active.size === 1) { mode = drag ? 'orbit' : null; return; }
-  mode = null; dragIdx = -1; setCursor(drag ? 'grab' : 'default');
+  mode = null; dragIdx = -1; setCursor(idleCursor);
 };
 cv.addEventListener('pointerup', end, { signal });
 cv.addEventListener('pointercancel', end, { signal });
@@ -755,11 +751,14 @@ else if (keys) keys.addEventListener('keydown', onKey, { signal });
 
 /* ----- boot ----- */
 cv.style.touchAction = 'none';   // else a one-finger drag becomes a page scroll mid-gesture
-setCursor(drag ? 'grab' : 'default');
+setCursor(idleCursor);
 X = (opts.points ?? preset('strip')).map(toXyz);
 Object.assign(cam, viewFrame(opts.view, X));
-const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null;
-if (ro) ro.observe(cv); else window.addEventListener('resize', resize, { signal });
+// The observer follows the layout box; the window listener catches an
+// ancestor transform changing with it (reveal.js rescaling its slides).
+const ro = new ResizeObserver(resize);
+ro.observe(cv);
+window.addEventListener('resize', resize, { signal });
 resize();   // paints the sphere and points before the solver is ready
 const ready = load().then(v => {
   if (signal.aborted) return v;
@@ -774,11 +773,10 @@ return {
   get points() { return X.map(p => ({ ...p })); },
   get solution() { return sol; },
   get show() { return { ...show }; },
-  setPoints(pts) { X = pts.map(toXyz); sol = null; recompute(); },
-  /** setView('home') or setView({ center, dist, roll, az, el }); see viewFrame. */
-  setView(spec) { Object.assign(cam, viewFrame(spec, X)); schedule('draw'); },
+  setPoints(pts) { X = pts.map(toXyz); recompute(); },
+  /** 'home', or { center | az/el, roll, dist } applied over the current view; see viewFrame. */
+  setView(spec) { Object.assign(cam, viewFrame(spec, X, cam)); schedule('draw'); },
   setShow(flags) { Object.assign(show, flags); schedule('draw'); },
-  resize,
-  destroy() { ac.abort(); ro?.disconnect(); if (rafId) cancelAnimationFrame(rafId); },
+  destroy() { ac.abort(); ro.disconnect(); if (rafId) cancelAnimationFrame(rafId); },
 };
 }

@@ -21,12 +21,7 @@
   body { background: var(--bg); color: var(--fg); display: flex; overflow: hidden;
     font: 13px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; }
   #stage { flex: 1 1 auto; position: relative; min-width: 0; }
-  /* Without touch-action the browser claims a one-finger drag for page
-     scrolling mid-gesture — pointerdown arrives, then pointercancel —
-     so orbiting and dragging points stutter. Pointer capture cannot
-     outrank gesture arbitration. */
-  canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
-  canvas.dragging { cursor: grabbing; }
+  canvas { display: block; width: 100%; height: 100%; }   /* cursor and touch-action: teec.js */
   #hint { position: absolute; left: 14px; bottom: 12px; color: var(--dim); font-size: 11.5px;
     pointer-events: none; }
   #back { position: absolute; right: 14px; top: 12px; color: var(--dim); font-size: 11.5px;
@@ -113,11 +108,11 @@
   <div class="btns"><button id="addPt">+ point</button><button id="resetCam">reset view</button></div>
 
   <h2>Display</h2>
-  <label class="ck"><input type="checkbox" id="cSphere" checked> unit sphere</label>
-  <label class="ck"><input type="checkbox" id="cLand"> coastlines</label>
-  <label class="ck"><input type="checkbox" id="cGno"> gnomonic plane bᵀx = 1 + cross-section</label>
-  <label class="ck"><input type="checkbox" id="cRays"> projection rays</label>
-  <label class="ck"><input type="checkbox" id="cHull" checked> convex hull of the points</label>
+  <label class="ck"><input type="checkbox" data-show="sphere" checked> unit sphere</label>
+  <label class="ck"><input type="checkbox" data-show="land"> coastlines</label>
+  <label class="ck"><input type="checkbox" data-show="gno"> gnomonic plane bᵀx = 1 + cross-section</label>
+  <label class="ck"><input type="checkbox" data-show="rays"> projection rays</label>
+  <label class="ck"><input type="checkbox" data-show="hull" checked> convex hull of the points</label>
 
   <h2>Legend</h2>
   <div class="note">
@@ -137,19 +132,18 @@
 <script type="module">
 /* The full page: teec.js draws and solves; this wires the sidebar to it.
    See README.md for the library and for the URL parameters used below. */
-import { mount, preset, onBoundary, frameOf, V, dot, add, scl, len, nz, mv } from './teec.js';
+import { mount, preset, centroid, pointNear, onBoundary, slack } from './teec.js';
 
 const ui = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
-const EMBED = document.documentElement.classList.contains('embed');   // set in <head>
+const EMBED = params.has('embed');   // the <head> script sets the matching CSS class
 
-// Overlay checkboxes: id is 'c' + Capitalized key; ?show= tokens are the keys.
-const OVERLAYS = ['sphere', 'land', 'gno', 'rays', 'hull'];
-const box = k => ui('c' + k[0].toUpperCase() + k.slice(1));
-const shown = () => Object.fromEntries(OVERLAYS.map(k => [k, box(k).checked]));
+// Overlay checkboxes carry data-show="<key>"; ?show= lists the keys to turn on.
+const boxes = [...document.querySelectorAll('[data-show]')];
+const shown = () => Object.fromEntries(boxes.map(b => [b.dataset.show, b.checked]));
 if (params.has('show')) {
   const on = new Set(params.get('show').split(','));
-  for (const k of OVERLAYS) box(k).checked = on.has(k);
+  for (const b of boxes) b.checked = on.has(b.dataset.show);
 }
 const dist = +params.get('dist');
 
@@ -157,30 +151,26 @@ const teec = mount(ui('cv'), {
   points: preset(params.get('preset') || 'strip'),
   view: dist > 0 ? { dist } : 'home',
   show: shown(),
-  background: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
   // On the full page keys are scoped to the focusable canvas so they never
   // hijack the page's; in embed mode the whole frame is the diagram, so
   // they are on window, and any key the diagram does not use is forwarded
   // to the parent so a host deck keeps its navigation keys.
   interaction: { keys: EMBED ? window : true },
-  onKey: e => {
-    if (EMBED && window.parent !== window)
-      window.parent.postMessage({ source: 'csar_viz', type: 'keydown', key: e.key, code: e.code,
-        keyCode: e.keyCode, shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey }, '*');
-  },
+  onKey: EMBED && window.parent !== window ? e =>
+    window.parent.postMessage({ source: 'csar_viz', type: 'keydown', key: e.key, code: e.code,
+      keyCode: e.keyCode, shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey }, '*') : undefined,
   onSolve: readout,
 });
 
 for (const btn of document.querySelectorAll('[data-preset]'))
   btn.onclick = () => teec.setPoints(preset(btn.dataset.preset));
 ui('addPt').onclick = () => {
-  const X = teec.points, c = nz(X.reduce((s, x) => add(s, x), V(0,0,0)));
-  const [u1, u2] = frameOf(c), a = Math.random()*2*Math.PI, r = 0.2 + 0.3*Math.random();
-  teec.setPoints([...X, nz(add(c, add(scl(u1, r*Math.cos(a)), scl(u2, r*Math.sin(a)))))]);
+  const X = teec.points;
+  teec.setPoints([...X, pointNear(centroid(X), 0.2 + 0.3*Math.random(), Math.random()*2*Math.PI)]);
 };
 ui('resetCam').onclick = () => teec.setView('home');
-for (const k of OVERLAYS) box(k).addEventListener('change', () => teec.setShow(shown()));
+for (const b of boxes) b.addEventListener('change', () => teec.setShow(shown()));
 
 // The sphere paints first; the panel says the solver is on its way. A
 // failure here is most likely someone opening this file directly, which
@@ -224,12 +214,11 @@ function readout(sol, X) {
   ui('s12').textContent = `${f(s1)}, ${f(s2)}`;
   ui('ld').textContent = f(sol.negLogDet, 6);
   ui('bv').textContent = `(${f(sol.b.x, 3)}, ${f(sol.b.y, 3)}, ${f(sol.b.z, 3)})`;
-  const c = mv(sol.Ai, sol.b), n = len(c);
-  ui('ha').textContent = `${f(Math.acos(Math.min(1, 1/n)) * 180/Math.PI, 2)}°`;
+  ui('ha').textContent = `${f(sol.halfAngle * 180/Math.PI, 2)}°`;
   ui('Amat').innerHTML = sol.A.map(x => `<div>${f(x, 3)}</div>`).join('');
   let worst = -Infinity, act = 0, sup = 0;
   for (const x of X) {
-    worst = Math.max(worst, len(mv(sol.A, x)) - dot(sol.b, x));
+    worst = Math.max(worst, slack(sol, x));
     if (onBoundary(sol, x)) act++;
   }
   for (const l of sol.lam) if (l > 0) sup++;
