@@ -122,7 +122,7 @@ teec.destroy();
   centroid, or `'axis'` for the solved cone's axis, looking straight down
   the cone with its cross-section centred) aims the camera with north up,
   `az`/`el` do the same in radians, `roll` twists about the view axis,
-  `dist` is the camera distance (1.8 to 14; the home view is 4). `'home'`
+  `dist` is the camera distance (1.02 to 14; the home view is 4). `'home'`
   resets everything. An `'axis'` view asked for before there is a
   solution (at mount, say) is applied once the next solve lands.
 - `show` toggles the overlays: `cone` (surface, rulings, apex), `rim` (its

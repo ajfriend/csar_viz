@@ -150,7 +150,9 @@ const HOME_AZ = 0.85, HOME_EL = 0.42;   // looks at the preset cluster
 const HOME = { ...frameAt(azel(HOME_AZ, HOME_EL)), dist: 4.0 };
 // The camera owns its own limits: wheel and pinch both zoom through
 // here, so the bounds cannot drift apart per input device.
-const clampDist = d => Math.min(14, Math.max(1.8, d));
+// 1.02 puts the eye ~11° of arc above the surface: close enough to fill the
+// view with a cell a few degrees across.
+const clampDist = d => Math.min(14, Math.max(1.02, d));
 /* A view spec -> camera fields. 'home' (or nothing) is HOME. An object
    starts from `base` and applies what it has: `center` (a point spelling,
    'points' for the centroid of X, or 'axis' for the solved cone's axis b)
@@ -283,7 +285,7 @@ const eye = () => scl(cam.back, cam.dist);
 function project(p) {
   // Depth along the view axis; the eye sits on cam.back so it drops out of x and y.
   const z = cam.dist - dot(p, cam.back);
-  if (z < 0.05) return null;
+  if (z < 1e-3) return null;
   return { x: W/2 + focal * dot(p, cam.right) / z, y: H/2 - focal * dot(p, cam.up) / z, z };
 }
 function rayAt(px, py) {   // world-space ray direction through a screen pixel
@@ -333,7 +335,9 @@ const pushPoly = (pts, fill, stroke, lw) => {
 const pushDot = (p, r, fill, stroke, lw) => {
   const q = project(p); if (!q) return;
   prims.push({ z: q.z, f: () => {
-    ctx.beginPath(); ctx.arc(q.x, q.y, r * (3.6 / q.z), 0, 7);
+    // Dots grow as the camera closes in, but not without bound: close views
+    // (dist near 1) would otherwise turn them into discs.
+    ctx.beginPath(); ctx.arc(q.x, q.y, r * Math.min(2.5, 3.6 / q.z), 0, 7);
     ctx.fillStyle = fill; ctx.fill();
     if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1.5; ctx.stroke(); } } });
 };
