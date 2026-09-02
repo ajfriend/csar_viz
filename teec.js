@@ -92,7 +92,10 @@ function solve(X) {
   const lam = r.lambdas ?? new Float64Array(X.length);
   // Half-angle of the round cone through the rim (see coneRim): from |A⁻¹b|.
   const halfAngle = Math.acos(Math.min(1, 1 / len(mv(Ai, b))));
-  return { ok: true, b, A, Ai, H, v: { x: 0, y: 0 }, f1, f2, P, sig, halfAngle,
+  // The rim's angular radius about b along its major axis: the cross-section
+  // semi-axis sqrt(TAU)/sigma_1 on the plane bᵀx = 1, seen from the apex.
+  const rimAngle = Math.atan(Math.sqrt(TAU) / sig[1]);
+  return { ok: true, b, A, Ai, H, v: { x: 0, y: 0 }, f1, f2, P, sig, halfAngle, rimAngle,
            gap: r.gap, floor: r.gap_floor, outer: r.iters, lam,
            aspect: r.aspectRatio, status: r.status,
            uncertified: r.status !== 'converged',
@@ -149,10 +152,14 @@ const frameAt = back => { const [right, up] = frameOf(back); return { right, up,
 const HOME_AZ = 0.85, HOME_EL = 0.42;   // looks at the preset cluster
 const HOME = { ...frameAt(azel(HOME_AZ, HOME_EL)), dist: 4.0 };
 // The camera owns its own limits: wheel and pinch both zoom through
-// here, so the bounds cannot drift apart per input device.
-// 1.02 puts the eye ~11° of arc above the surface: close enough to fill the
-// view with a cell a few degrees across.
-const clampDist = d => Math.min(14, Math.max(1.02, d));
+// here, so the bounds cannot drift apart per input device. MIN_DIST puts
+// the eye ~11° of arc above the surface, close enough to fill the view
+// with a cell a few degrees across; project()'s near plane follows it.
+const MIN_DIST = 1.02, MAX_DIST = 14;
+const clampDist = d => Math.min(MAX_DIST, Math.max(MIN_DIST, d));
+// Perspective: focal length as a multiple of the view's shorter side. Shared
+// by resize() and fitDist() so a fit is a fraction of the view at any size.
+const FOCAL_K = 1.15;
 /* A view spec -> camera fields. 'home' (or nothing) is HOME. An object
    starts from `base` and applies what it has: `center` (a point spelling,
    'points' for the centroid of X, or 'axis' for the solved cone's axis b)
@@ -262,15 +269,27 @@ const setDist = d => {
 };
 let X = [], sol = null, W = 0, H = 0, dpr = 1, focal = 1, solverReady = false;
 
-/* A view that aims at the solution cannot be applied before there is one:
-   applyView applies what it can now and parks the spec (with the base it
-   was asked to apply over) until the next successful solve. */
-const needsSolution = spec => spec?.center === 'axis';
+/* A view that aims at the solution ('axis') or sizes itself to it ('fit')
+   cannot be applied before there is one: applyView applies what it can now
+   and parks the spec (with the base it was asked to apply over) until the
+   next successful solve. */
+const needsSolution = spec => spec?.center === 'axis' || spec?.fit != null;
 let pendingView = null;   // { spec, base }
 const applyView = (spec, base = cam) => {
   const b = { ...base };
   Object.assign(cam, viewFrame(spec, X, b, sol));
-  pendingView = needsSolution(spec) && !sol?.ok ? { spec, base: b } : null;
+  const waiting = needsSolution(spec) && !sol?.ok;
+  if (!waiting && spec?.fit != null) cam.dist = fitDist(spec.fit);
+  pendingView = waiting ? { spec, base: b } : null;
+};
+// The distance at which the solved rim (angular radius sol.rimAngle about
+// the axis, along its major axis) spans `fit` of the view's shorter side,
+// looking down the axis: a rim point at angle t lands focal·sin t /
+// (dist − cos t) px off centre, and focal is FOCAL_K times that side, so
+// the view size drops out.
+const fitDist = fit => {
+  const t = sol.rimAngle;
+  return clampDist(Math.cos(t) + 2 * FOCAL_K * Math.sin(t) / fit);
 };
 function recompute() {
   if (solverReady) {
@@ -285,7 +304,7 @@ const eye = () => scl(cam.back, cam.dist);
 function project(p) {
   // Depth along the view axis; the eye sits on cam.back so it drops out of x and y.
   const z = cam.dist - dot(p, cam.back);
-  if (z < 1e-3) return null;
+  if (z < (MIN_DIST - 1) / 2) return null;
   return { x: W/2 + focal * dot(p, cam.right) / z, y: H/2 - focal * dot(p, cam.up) / z, z };
 }
 function rayAt(px, py) {   // world-space ray direction through a screen pixel
@@ -313,7 +332,7 @@ function resize() {
   W = w; H = h; dpr = d;
   cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  focal = 1.15 * Math.min(W, H);
+  focal = FOCAL_K * Math.min(W, H);
   draw();
 }
 const prims = [];
@@ -335,9 +354,8 @@ const pushPoly = (pts, fill, stroke, lw) => {
 const pushDot = (p, r, fill, stroke, lw) => {
   const q = project(p); if (!q) return;
   prims.push({ z: q.z, f: () => {
-    // Dots grow as the camera closes in, but not without bound: close views
-    // (dist near 1) would otherwise turn them into discs.
-    ctx.beginPath(); ctx.arc(q.x, q.y, r * Math.min(2.5, 3.6 / q.z), 0, 7);
+    // r is the size of the nearest surface point; farther ones shrink with depth.
+    ctx.beginPath(); ctx.arc(q.x, q.y, r * (cam.dist - 1) / q.z, 0, 7);
     ctx.fillStyle = fill; ctx.fill();
     if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1.5; ctx.stroke(); } } });
 };
@@ -446,7 +464,7 @@ function drawCone(S) {
   }
   for (let k = 0; k < rim.length; k += 16)            // a few rulings for structure
     pushLine(O, ext(rim[k]), 'rgba(13,148,136,0.30)', 1);
-  pushDot(O, 2.6, '#5a6478', '#ffffff', 1);           // apex
+  pushDot(O, 3.0, '#5a6478', '#ffffff', 1);           // apex
 }
 
 // The cone's rim: its cross-section, the spherical ellipse through the support points.
@@ -631,6 +649,7 @@ function drawHull(S) {
 }
 
 function draw() {
+  if (!W || !H) return;   // not laid out; resize() draws when it is
   LIGHT = nz(add(add(scl(cam.right, -0.45), scl(cam.up, 0.55)), scl(cam.back, 0.70)));
   prims.length = 0;
   ctx.clearRect(0, 0, W, H);   // transparent: the host paints behind the canvas
@@ -651,7 +670,7 @@ function draw() {
   for (let i = 0; i < X.length; i++) {
     const x = X[i];
     const act = sol && sol.ok && onBoundary(sol, x);
-    pushDot(x, act ? 5.2 : 4.2, act ? '#c2620a' : '#8a94a6', '#ffffff', 1.6);
+    pushDot(x, act ? 6.2 : 5.0, act ? '#c2620a' : '#8a94a6', '#ffffff', 1.6);
   }
 
   prims.sort((a, b) => b.z - a.z);

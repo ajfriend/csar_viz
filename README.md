@@ -103,7 +103,7 @@ const teec = mount(canvas, {
   view: { center: 'points', dist: 2.7 },
   show: { cone: true, rim: true, axis: true, hull: true, sphere: true, gno: false, rays: false, land: false },
   interaction: { drag: true, zoom: true, keys: true, edit: true },   // fixed at mount
-  onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, sol.halfAngle, ...
+  onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, sol.rimAngle, ...
   onKey: e => {},                     // keys the diagram does not use
 });
 await teec.ready;                     // the solver is loaded and the first solve drawn
@@ -122,9 +122,13 @@ teec.destroy();
   centroid, or `'axis'` for the solved cone's axis, looking straight down
   the cone with its cross-section centred) aims the camera with north up,
   `az`/`el` do the same in radians, `roll` twists about the view axis,
-  `dist` is the camera distance (1.02 to 14; the home view is 4). `'home'`
-  resets everything. An `'axis'` view asked for before there is a
-  solution (at mount, say) is applied once the next solve lands.
+  `dist` is the camera distance (1.02 to 14; the home view is 4); `fit`
+  instead sets the distance so the solved cone's rim spans that fraction
+  of the view's shorter side, meant with `center: 'axis'` (a cell filling
+  half the stage: `{ center: 'axis', fit: 0.45 }`). `'home'` resets
+  everything. A view that needs a solution (`'axis'`, `fit`) asked for
+  before there is one (at mount, say) is applied once the next solve
+  lands.
 - `show` toggles the overlays: `cone` (surface, rulings, apex), `rim` (its
   cross-section on the sphere, the spherical ellipse), `axis` (the arrow
   along b), `hull`, `sphere`, `land`, `gno`, `rays`. Points and the cone
