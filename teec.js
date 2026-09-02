@@ -153,14 +153,17 @@ const HOME = { ...frameAt(azel(HOME_AZ, HOME_EL)), dist: 4.0 };
 const clampDist = d => Math.min(14, Math.max(1.8, d));
 /* A view spec -> camera fields. 'home' (or nothing) is HOME. An object
    starts from `base` (HOME at mount, the current view in setView) and
-   applies what it has: `center` (a point spelling, or 'points' for the
-   centroid of X) aims the camera with north up; `az`/`el` (radians) do the
-   same in spherical terms; `roll` (radians) twists about the view axis;
-   `dist` sets the distance. */
-export function viewFrame(spec, X = [], base = HOME) {
+   applies what it has: `center` (a point spelling, 'points' for the
+   centroid of X, or 'axis' for the solved cone's axis b, which looks
+   straight down the cone with its cross-section centred) aims the camera
+   with north up; `az`/`el` (radians) do the same in spherical terms;
+   `roll` (radians) twists about the view axis; `dist` sets the distance.
+   'axis' needs a solution; without one it leaves the aim alone. */
+export function viewFrame(spec, X = [], base = HOME, sol = null) {
   if (!spec || spec === 'home') return { ...HOME };
   const v = { ...base };
-  if (spec.center === 'points') { if (X.length) Object.assign(v, frameAt(centroid(X))); }
+  if (spec.center === 'axis') { if (sol?.ok) Object.assign(v, frameAt(sol.b)); }
+  else if (spec.center === 'points') { if (X.length) Object.assign(v, frameAt(centroid(X))); }
   else if (spec.center != null) Object.assign(v, frameAt(toXyz(spec.center)));
   else if (spec.az != null || spec.el != null) Object.assign(v, frameAt(azel(spec.az ?? HOME_AZ, spec.el ?? HOME_EL)));
   if (spec.roll) { v.right = rot(v.right, v.back, spec.roll); v.up = cross(v.back, v.right); }
@@ -763,7 +766,10 @@ resize();   // paints the sphere and points before the solver is ready
 const ready = load().then(v => {
   if (signal.aborted) return v;
   solverReady = true;
-  recompute();
+  sol = solve(X); opts.onSolve?.(sol, X);
+  // An 'axis' view could not be aimed before the first solve; aim it now.
+  if (opts.view?.center === 'axis') Object.assign(cam, viewFrame(opts.view, X, cam, sol));
+  draw();
   return v;
 });
 
@@ -775,7 +781,7 @@ return {
   get show() { return { ...show }; },
   setPoints(pts) { X = pts.map(toXyz); recompute(); },
   /** 'home', or { center | az/el, roll, dist } applied over the current view; see viewFrame. */
-  setView(spec) { Object.assign(cam, viewFrame(spec, X, cam)); schedule('draw'); },
+  setView(spec) { Object.assign(cam, viewFrame(spec, X, cam, sol)); schedule('draw'); },
   setShow(flags) { Object.assign(show, flags); schedule('draw'); },
   destroy() { ac.abort(); ro.disconnect(); if (rafId) cancelAnimationFrame(rafId); },
 };
