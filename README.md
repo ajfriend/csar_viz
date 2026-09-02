@@ -102,6 +102,13 @@ For example `index.html?embed&preset=quad&show=sphere,hull,gno`. Interaction
 (orbit, zoom, drag points, shift-click to add, double-click to delete) still
 works in embed mode; only the chrome is gone.
 
+Keyboard, same map as ajglobe: `W`/`S` tilt, `A`/`D` spin, `Q`/`E` roll,
+`Shift` for a bigger step. Arrow keys are deliberately unmapped. In embed
+mode any key the diagram does not use is forwarded to the parent window as
+`postMessage({source: 'csar_viz', type: 'keydown', key, code, keyCode, ...})`,
+so a host (a reveal.js deck, say) can keep its own navigation keys working
+while the iframe has focus.
+
 ## How it solves it in the browser
 
 It runs **csar itself**, compiled to `wasm32-freestanding`. The page loads

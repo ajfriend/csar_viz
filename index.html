@@ -73,7 +73,7 @@
 <div id="stage">
   <canvas id="cv"></canvas>
   <a id="back" href="playground.html">2D playground →</a>
-  <div id="hint">drag to orbit · scroll or pinch to zoom · drag a point to move it on the sphere · with a mouse: shift-click the sphere to add, double-click a point to delete</div>
+  <div id="hint">drag to orbit · scroll or pinch to zoom · W/A/S/D tilt and spin, Q/E roll (click the globe first) · drag a point to move it on the sphere · with a mouse: shift-click the sphere to add, double-click a point to delete</div>
 </div>
 
 <aside>
@@ -243,7 +243,35 @@ function frameOf(b) {
 /* =======================  scene state  ======================= */
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const ui = id => document.getElementById(id);
-const cam = { az: 0.85, el: 0.42, dist: 4.0 };
+const params = new URLSearchParams(location.search);
+const EMBED = params.has('embed');
+
+/* The camera is a free orthonormal frame (right, up, back) at distance
+   dist along back: no azimuth/elevation, so no clamp at the poles and no
+   gimbal lock. Drag and keys rotate the frame about its own axes. */
+const frameFromAzEl = (az, el) => {
+  const back = V(Math.cos(el)*Math.cos(az), Math.cos(el)*Math.sin(az), Math.sin(el));
+  const right = nz(cross(scl(back, -1), V(0, 0, 1)));
+  return { right, up: cross(back, right), back };
+};
+const HOME = { az: 0.85, el: 0.42, dist: 4.0 };
+const cam = { ...frameFromAzEl(HOME.az, HOME.el), dist: HOME.dist };
+// Rodrigues: rotate v about unit axis k by t.
+const rot = (v, k, t) => {
+  const c = Math.cos(t), sn = Math.sin(t);
+  return add(add(scl(v, c), scl(cross(k, v), sn)), scl(k, dot(k, v) * (1 - c)));
+};
+function rotateCam(axis, t) {
+  cam.right = rot(cam.right, axis, t); cam.up = rot(cam.up, axis, t); cam.back = rot(cam.back, axis, t);
+  // Re-orthonormalize so float drift cannot skew the frame over a long session.
+  cam.back = nz(cam.back);
+  cam.right = nz(sub(cam.right, scl(cam.back, dot(cam.right, cam.back))));
+  cam.up = cross(cam.back, cam.right);
+  schedule('draw');
+}
+const spin = t => rotateCam(cam.up, t);      // about the screen vertical
+const tilt = t => rotateCam(cam.right, t);   // about the screen horizontal
+const roll = t => rotateCam(cam.back, t);    // about the view axis
 // The camera owns its own limits: wheel and pinch both zoom through
 // here, so the bounds cannot drift apart per input device.
 const setDist = d => {
@@ -280,10 +308,7 @@ function recompute() {
 
 /* =======================  camera  ======================= */
 function basis() {
-  const eye = scl(V(Math.cos(cam.el)*Math.cos(cam.az), Math.cos(cam.el)*Math.sin(cam.az), Math.sin(cam.el)), cam.dist);
-  const fwd = nz(scl(eye, -1));
-  const right = nz(cross(fwd, V(0, 0, 1)));
-  return { eye, fwd, right, up: cross(right, fwd) };
+  return { eye: scl(cam.back, cam.dist), fwd: scl(cam.back, -1), right: cam.right, up: cam.up };
 }
 let B = basis();
 function project(p) {
@@ -782,9 +807,9 @@ cv.addEventListener('pointermove', e => {
     return;
   }
   if (mode === 'orbit' && prev) {
-    cam.az -= (px - prev.x) * 0.008;
-    cam.el = Math.max(-1.45, Math.min(1.45, cam.el + (py - prev.y) * 0.008));
-    schedule('draw');
+    // Content follows the pointer: a drag right spins the frame the other way.
+    spin(-(px - prev.x) * 0.008);
+    tilt(-(py - prev.y) * 0.008);
   } else if (mode === 'pt') {
     X[dragIdx] = hitSphere(px, py);
     schedule('solve');
@@ -821,7 +846,30 @@ ui('addPt').onclick = () => {
   X.push(nz(add(c, add(scl(u1, r*Math.cos(a)), scl(u2, r*Math.sin(a))))));
   recompute();
 };
-ui('resetCam').onclick = () => { cam.az = 0.85; cam.el = 0.42; setDist(4.0); };
+ui('resetCam').onclick = () => { Object.assign(cam, frameFromAzEl(HOME.az, HOME.el)); setDist(HOME.dist); };
+
+/* Keyboard, same map as ajglobe: W/S tilt, A/D spin, Q/E roll, Shift for a
+   bigger step. Directions are by on-screen motion, matching a drag. Arrow
+   keys are deliberately unmapped so a host page keeps them. On the full
+   page the listener is scoped to the focusable canvas so it never hijacks
+   the page's keys; in embed mode the whole frame is the diagram, so it is
+   on window, and any key we do not use is forwarded to the parent. */
+const KEYS = { KeyW: [tilt, 1], KeyS: [tilt, -1], KeyA: [spin, 1], KeyD: [spin, -1],
+               KeyQ: [roll, -1], KeyE: [roll, 1] };
+const onKey = e => {
+  const k = KEYS[e.code];
+  if (!k || e.metaKey || e.ctrlKey || e.altKey) {
+    if (EMBED && window.parent !== window)
+      window.parent.postMessage({ source: 'csar_viz', type: 'keydown', key: e.key, code: e.code,
+        keyCode: e.keyCode, shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey }, '*');
+    return;
+  }
+  e.preventDefault();
+  k[0](k[1] * (e.shiftKey ? 30 : 10) * Math.PI / 180);
+};
+if (EMBED) window.addEventListener('keydown', onKey);
+else { cv.tabIndex = 0; cv.addEventListener('keydown', onKey); }
 for (const id of ['cSphere', 'cLand', 'cGno', 'cRays', 'cHull']) ui(id).addEventListener('change', draw);
 window.addEventListener('resize', resize);
 
@@ -831,7 +879,6 @@ window.addEventListener('resize', resize);
      ?show=gno,rays     overlay toggles, comma-separated: sphere land gno rays hull
                         (listed ones on, the rest off; omit to keep the defaults)
      ?dist=2.8          initial camera distance (default 4; smaller is a bigger globe) */
-const params = new URLSearchParams(location.search);
 preset(params.get('preset') || 'strip');
 if (params.has('dist')) { const d = Number(params.get('dist')); if (d > 0) setDist(d); }
 if (params.has('show')) {
