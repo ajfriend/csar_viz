@@ -31,6 +31,8 @@
   #back { position: absolute; right: 14px; top: 12px; color: var(--dim); font-size: 11.5px;
     text-decoration: none; }
   #back:hover { color: var(--accent); }
+  /* ?embed — just the diagram, for iframing (e.g. into a slide deck). */
+  html.embed aside, html.embed #hint, html.embed #back { display: none; }
   aside { width: 340px; flex: 0 0 340px; background: var(--panel); border-left: 1px solid var(--line);
     padding: 18px 18px 28px; overflow-y: auto; height: 100%; }
   h1 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
@@ -60,13 +62,18 @@
   @media (max-width: 860px) { body { flex-direction: column; overflow: auto; }
     #stage { height: 60vh; flex: none; } aside { width: 100%; flex: none; height: auto; border: none; } }
 </style>
+<script>
+  // Before first paint, so the sidebar never flashes in embed mode.
+  if (new URLSearchParams(location.search).has('embed'))
+    document.documentElement.classList.add('embed');
+</script>
 </head>
 <body>
 
 <div id="stage">
   <canvas id="cv"></canvas>
   <a id="back" href="playground.html">2D playground →</a>
-  <div id="hint">drag to orbit · scroll or pinch to zoom · drag a point to move it on the sphere · with a mouse: shift-click the sphere to add, double-click a point to delete</div>
+  <div id="hint">drag to orbit · scroll or pinch to zoom · W/A/S/D tilt and spin, Q/E roll (click the globe first) · drag a point to move it on the sphere · with a mouse: shift-click the sphere to add, double-click a point to delete</div>
 </div>
 
 <aside>
@@ -236,11 +243,41 @@ function frameOf(b) {
 /* =======================  scene state  ======================= */
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const ui = id => document.getElementById(id);
-const cam = { az: 0.85, el: 0.42, dist: 4.0 };
+const params = new URLSearchParams(location.search);
+const EMBED = document.documentElement.classList.contains('embed');   // set in <head>
+
+/* The camera is a free orthonormal frame (right, up, back) at distance
+   dist along back: no azimuth/elevation, so no clamp at the poles and no
+   gimbal lock. Drag and keys rotate the frame about its own axes. */
+const HOME = (() => {   // azimuth 0.85, elevation 0.42: looks at the preset cluster
+  const az = 0.85, el = 0.42;
+  const back = V(Math.cos(el)*Math.cos(az), Math.cos(el)*Math.sin(az), Math.sin(el));
+  const [right, up] = frameOf(back);
+  return { right, up, back, dist: 4.0 };
+})();
+const cam = { ...HOME };
+// Rodrigues: rotate v about unit axis k by t.
+const rot = (v, k, t) => {
+  const c = Math.cos(t), sn = Math.sin(t);
+  return add(add(scl(v, c), scl(cross(k, v), sn)), scl(k, dot(k, v) * (1 - c)));
+};
+function rotateCam(axis, t) {
+  // Rotate two axes and rebuild the third: re-orthonormalizing every time
+  // keeps float drift from skewing the frame over a long session.
+  cam.back = nz(rot(cam.back, axis, t));
+  const r = rot(cam.right, axis, t);
+  cam.right = nz(sub(r, scl(cam.back, dot(r, cam.back))));
+  cam.up = cross(cam.back, cam.right);
+  schedule('draw');
+}
+const spin = t => rotateCam(cam.up, t);      // about the screen vertical
+const tilt = t => rotateCam(cam.right, t);   // about the screen horizontal
+const roll = t => rotateCam(cam.back, t);    // about the view axis
 // The camera owns its own limits: wheel and pinch both zoom through
 // here, so the bounds cannot drift apart per input device.
+const clampDist = d => Math.min(14, Math.max(1.8, d));
 const setDist = d => {
-  cam.dist = Math.min(14, Math.max(1.8, d));
+  cam.dist = clampDist(d);
   schedule('draw');
 };
 let X = [], sol = null, W = 0, H = 0, dpr = 1, focal = 1;
@@ -272,24 +309,18 @@ function recompute() {
 }
 
 /* =======================  camera  ======================= */
-function basis() {
-  const eye = scl(V(Math.cos(cam.el)*Math.cos(cam.az), Math.cos(cam.el)*Math.sin(cam.az), Math.sin(cam.el)), cam.dist);
-  const fwd = nz(scl(eye, -1));
-  const right = nz(cross(fwd, V(0, 0, 1)));
-  return { eye, fwd, right, up: cross(right, fwd) };
-}
-let B = basis();
+const eye = () => scl(cam.back, cam.dist);
 function project(p) {
-  const d = sub(p, B.eye);
-  const z = dot(d, B.fwd);
+  // Depth along the view axis; the eye sits on cam.back so it drops out of x and y.
+  const z = cam.dist - dot(p, cam.back);
   if (z < 0.05) return null;
-  return { x: W/2 + focal * dot(d, B.right) / z, y: H/2 - focal * dot(d, B.up) / z, z };
+  return { x: W/2 + focal * dot(p, cam.right) / z, y: H/2 - focal * dot(p, cam.up) / z, z };
 }
 function rayAt(px, py) {   // world-space ray direction through a screen pixel
-  return nz(add(add(scl(B.right, (px - W/2) / focal), scl(B.up, -(py - H/2) / focal)), B.fwd));
+  return nz(sub(add(scl(cam.right, (px - W/2) / focal), scl(cam.up, -(py - H/2) / focal)), cam.back));
 }
 function hitSphere(px, py) {
-  const d = rayAt(px, py), o = B.eye;
+  const d = rayAt(px, py), o = eye();
   const b2 = dot(o, d), c2 = dot(o, o) - 1, disc = b2*b2 - c2;
   if (disc < 0) return nz(sub(add(o, scl(d, -b2)), V(0,0,0)));   // graze: nearest point
   return add(o, scl(d, -b2 - Math.sqrt(disc)));
@@ -445,7 +476,7 @@ function drawCone(S) {
     const p0 = ext(d0), p1 = ext(d1);
     let nrm = nz(cross(d0, d1));
     if (dot(nrm, S.b) > 0) nrm = scl(nrm, -1);        // b is interior, so flip to point outward
-    const toEye = nz(sub(B.eye, scl(add(p0, p1), 0.5)));
+    const toEye = nz(sub(eye(), scl(add(p0, p1), 0.5)));
     const front = dot(nrm, toEye) > 0;
     const lam = Math.max(0, dot(nrm, LIGHT));
     // On white, unlit facets must go DARKER to stay visible, so shade multiplies
@@ -625,8 +656,7 @@ function drawHull(S) {
 }
 
 function draw() {
-  B = basis();
-  LIGHT = nz(add(add(scl(B.right, -0.45), scl(B.up, 0.55)), scl(B.fwd, -0.70)));
+  LIGHT = nz(add(add(scl(cam.right, -0.45), scl(cam.up, 0.55)), scl(cam.back, 0.70)));
   prims.length = 0;
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
@@ -775,9 +805,12 @@ cv.addEventListener('pointermove', e => {
     return;
   }
   if (mode === 'orbit' && prev) {
-    cam.az -= (px - prev.x) * 0.008;
-    cam.el = Math.max(-1.45, Math.min(1.45, cam.el + (py - prev.y) * 0.008));
-    schedule('draw');
+    // Arcball: rotate the camera so the sphere point that was under the
+    // cursor is under it again. Past the rim hitSphere gives the nearest
+    // point, so the globe keeps rolling instead of sticking.
+    const from = hitSphere(prev.x, prev.y), here = hitSphere(px, py);
+    const ax = cross(here, from), sn = len(ax);
+    if (sn > 1e-9) rotateCam(scl(ax, 1 / sn), Math.atan2(sn, dot(here, from)));
   } else if (mode === 'pt') {
     X[dragIdx] = hitSphere(px, py);
     schedule('solve');
@@ -814,11 +847,42 @@ ui('addPt').onclick = () => {
   X.push(nz(add(c, add(scl(u1, r*Math.cos(a)), scl(u2, r*Math.sin(a))))));
   recompute();
 };
-ui('resetCam').onclick = () => { cam.az = 0.85; cam.el = 0.42; setDist(4.0); };
-for (const id of ['cSphere', 'cLand', 'cGno', 'cRays', 'cHull']) ui(id).addEventListener('change', draw);
+ui('resetCam').onclick = () => { Object.assign(cam, HOME); schedule('draw'); };
+
+/* Keyboard (map in the README; directions are by on-screen motion, like a
+   drag; arrows deliberately unmapped). On the full page the listener is
+   scoped to the focusable canvas so it never hijacks the page's keys; in
+   embed mode the whole frame is the diagram, so it is on window, and any
+   key we do not use is forwarded to the parent. */
+const KEYS = { KeyW: [tilt, 1], KeyS: [tilt, -1], KeyA: [spin, 1], KeyD: [spin, -1],
+               KeyQ: [roll, -1], KeyE: [roll, 1] };
+const onKey = e => {
+  const k = KEYS[e.code];
+  if (!k || e.metaKey || e.ctrlKey || e.altKey) {
+    if (EMBED && window.parent !== window)
+      window.parent.postMessage({ source: 'csar_viz', type: 'keydown', key: e.key, code: e.code,
+        keyCode: e.keyCode, shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey }, '*');
+    return;
+  }
+  e.preventDefault();
+  k[0](k[1] * (e.shiftKey ? 30 : 10) * Math.PI / 180);
+};
+if (EMBED) window.addEventListener('keydown', onKey);
+else { cv.tabIndex = 0; cv.addEventListener('keydown', onKey); }
+const OVERLAYS = ['cSphere', 'cLand', 'cGno', 'cRays', 'cHull'];   // ?show= tokens: id minus the c, lowercased
+for (const id of OVERLAYS) ui(id).addEventListener('change', draw);
 window.addEventListener('resize', resize);
 
-preset('strip');
+// URL parameters (?embed ?preset ?show ?dist): see README, "Embedding it elsewhere".
+// All applied before resize() paints, so startup draws once.
+preset(params.get('preset') || 'strip');
+const dist = +params.get('dist');
+if (dist > 0) cam.dist = clampDist(dist);
+if (params.has('show')) {
+  const on = new Set(params.get('show').split(','));
+  for (const id of OVERLAYS) ui(id).checked = on.has(id.slice(1).toLowerCase());
+}
 resize();
 
 // Paint the sphere first, then load the solver. The panel says so on
