@@ -38,7 +38,7 @@ const mv = (M, x) => V(M[0]*x.x + M[1]*x.y + M[2]*x.z,
 // one solver constant this module still spells out. Filed upstream.
 // vendor/ is a matched pair from this csar_abi release; load() checks
 // the module agrees. See vendor/PROVENANCE.
-const VENDORED_ABI = '0.2.0';
+const VENDORED_ABI = '0.2.1';
 
 const GAP_UNCERTIFIED = 1e30;
 
