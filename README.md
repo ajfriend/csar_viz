@@ -103,7 +103,7 @@ const teec = mount(canvas, {
   view: { center: 'points', dist: 2.7 },
   show: { cone: true, rim: true, axis: true, hull: true, sphere: true, gno: false, rays: false, land: false },
   interaction: { drag: true, zoom: true, keys: true, edit: true },   // fixed at mount
-  onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, sol.rimAngle, ...
+  onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, sol.halfAngle, ...
   onKey: e => {},                     // keys the diagram does not use
 });
 await teec.ready;                     // the solver is loaded and the first solve drawn

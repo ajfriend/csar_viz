@@ -92,10 +92,7 @@ function solve(X) {
   const lam = r.lambdas ?? new Float64Array(X.length);
   // Half-angle of the round cone through the rim (see coneRim): from |A⁻¹b|.
   const halfAngle = Math.acos(Math.min(1, 1 / len(mv(Ai, b))));
-  // The rim's angular radius about b along its major axis: the cross-section
-  // semi-axis sqrt(TAU)/sigma_1 on the plane bᵀx = 1, seen from the apex.
-  const rimAngle = Math.atan(Math.sqrt(TAU) / sig[1]);
-  return { ok: true, b, A, Ai, H, v: { x: 0, y: 0 }, f1, f2, P, sig, halfAngle, rimAngle,
+  return { ok: true, b, A, Ai, H, v: { x: 0, y: 0 }, f1, f2, P, sig, halfAngle,
            gap: r.gap, floor: r.gap_floor, outer: r.iters, lam,
            aspect: r.aspectRatio, status: r.status,
            uncertified: r.status !== 'converged',
@@ -157,16 +154,31 @@ const HOME = { ...frameAt(azel(HOME_AZ, HOME_EL)), dist: 4.0 };
 // with a cell a few degrees across; project()'s near plane follows it.
 const MIN_DIST = 1.02, MAX_DIST = 14;
 const clampDist = d => Math.min(MAX_DIST, Math.max(MIN_DIST, d));
+// project()'s near plane: anything closer to the eye than this is dropped.
+// Below MIN_DIST − 1 so the nearest sphere point always projects; overlays
+// lifted off the sphere (the hull at R = 1.004) must stay under MIN_DIST too.
+const NEAR = (MIN_DIST - 1) / 2;
 // Perspective: focal length as a multiple of the view's shorter side. Shared
 // by resize() and fitDist() so a fit is a fraction of the view at any size.
 const FOCAL_K = 1.15;
+// The distance at which the solved rim spans `fit` of the view's shorter
+// side, looking down the axis. The rim's angular radius about b along its
+// major axis is t = atan(1/√H.a), the cross-section semi-axis on the plane
+// bᵀx = 1 seen from the apex; a rim point at angle t lands
+// focal·sin t / (dist − cos t) px off centre, and focal is FOCAL_K times
+// that side, so the view size drops out.
+const fitDist = (sol, fit) => {
+  const t = Math.atan(1 / Math.sqrt(sol.H.a));
+  return clampDist(Math.cos(t) + 2 * FOCAL_K * Math.sin(t) / fit);
+};
 /* A view spec -> camera fields. 'home' (or nothing) is HOME. An object
    starts from `base` and applies what it has: `center` (a point spelling,
    'points' for the centroid of X, or 'axis' for the solved cone's axis b)
    aims the camera with north up; `az`/`el` (radians) do the same in
    spherical terms; `roll` (radians) twists about the view axis; `dist`
-   sets the distance. An aim whose target is missing (no points, no
-   solution yet) is left alone; see needsSolution. */
+   sets the distance; `fit` sets it from the solved rim instead (see
+   fitDist) and wins over `dist`. A field whose target is missing (no
+   points, no solution yet) is left alone; see needsSolution. */
 export function viewFrame(spec, X = [], base = HOME, sol = null) {
   if (!spec || spec === 'home') return { ...HOME };
   const v = { ...base };
@@ -178,6 +190,7 @@ export function viewFrame(spec, X = [], base = HOME, sol = null) {
   if (at) Object.assign(v, frameAt(at));
   if (spec.roll) { v.right = rot(v.right, v.back, spec.roll); v.up = cross(v.back, v.right); }
   if (spec.dist != null) v.dist = clampDist(spec.dist);
+  if (spec.fit != null && sol?.ok) v.dist = fitDist(sol, spec.fit);
   return v;
 }
 /* Point-set presets, as arrays of unit vectors. `rand` differs per call. */
@@ -278,18 +291,7 @@ let pendingView = null;   // { spec, base }
 const applyView = (spec, base = cam) => {
   const b = { ...base };
   Object.assign(cam, viewFrame(spec, X, b, sol));
-  const waiting = needsSolution(spec) && !sol?.ok;
-  if (!waiting && spec?.fit != null) cam.dist = fitDist(spec.fit);
-  pendingView = waiting ? { spec, base: b } : null;
-};
-// The distance at which the solved rim (angular radius sol.rimAngle about
-// the axis, along its major axis) spans `fit` of the view's shorter side,
-// looking down the axis: a rim point at angle t lands focal·sin t /
-// (dist − cos t) px off centre, and focal is FOCAL_K times that side, so
-// the view size drops out.
-const fitDist = fit => {
-  const t = sol.rimAngle;
-  return clampDist(Math.cos(t) + 2 * FOCAL_K * Math.sin(t) / fit);
+  pendingView = needsSolution(spec) && !sol?.ok ? { spec, base: b } : null;
 };
 function recompute() {
   if (solverReady) {
@@ -304,7 +306,7 @@ const eye = () => scl(cam.back, cam.dist);
 function project(p) {
   // Depth along the view axis; the eye sits on cam.back so it drops out of x and y.
   const z = cam.dist - dot(p, cam.back);
-  if (z < (MIN_DIST - 1) / 2) return null;
+  if (z < NEAR) return null;
   return { x: W/2 + focal * dot(p, cam.right) / z, y: H/2 - focal * dot(p, cam.up) / z, z };
 }
 function rayAt(px, py) {   // world-space ray direction through a screen pixel
