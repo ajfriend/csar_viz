@@ -261,7 +261,7 @@ export function load() {
 export function mount(canvas, opts = {}) {
 const cv = canvas, ctx = cv.getContext('2d');
 const show = { sphere: true, land: false, gno: false, rays: false, hull: true,
-               cone: true, rim: true, axis: true, ...opts.show };
+               cone: true, rim: true, axis: true, outline: false, ...opts.show };
 const { drag = true, zoom = true, keys = true, edit = true } = opts.interaction ?? {};
 const ac = new AbortController(), signal = ac.signal;   // every listener detaches on destroy()
 const cam = { ...HOME };
@@ -658,6 +658,29 @@ function drawHull(S) {
   }
 }
 
+// The input points as a polygon in the order given, filled: the picture of
+// a NON-convex input (a star), where the hull is the wrong shape. Edges are
+// great-circle arcs, densified to ~11 px like the hull's boundary, and
+// filled as one flat screen-space path (meant for cell-sized shapes, which
+// are flat to the eye; a near-hemisphere outline would sag like the hull
+// comment describes). Same lift and colours as the hull.
+function drawOutline() {
+  if (X.length < 3) return;
+  const R = 1 + HULL_LIFT * (cam.dist - 1);
+  const step = Math.max(0.012, 11 * cam.dist / focal);
+  const pts = [];
+  for (let i = 0; i < X.length; i++) {
+    const a = X[i], b = X[(i + 1) % X.length];
+    const th = Math.acos(Math.max(-1, Math.min(1, dot(a, b))));
+    const K = Math.max(1, Math.ceil(th / step));
+    for (let k = 0; k < K; k++) {
+      const t = k / K;
+      pts.push(scl(nz(add(scl(a, 1 - t), scl(b, t))), R));
+    }
+  }
+  pushPoly(pts, 'rgba(124,92,214,0.20)', 'rgba(104,70,198,0.85)', 2);
+}
+
 function draw() {
   if (!W || !H) return;   // not laid out; resize() draws when it is
   LIGHT = nz(add(add(scl(cam.right, -0.45), scl(cam.up, 0.55)), scl(cam.back, 0.70)));
@@ -666,6 +689,7 @@ function draw() {
 
   if (show.sphere) sphereWire();
   if (show.land) drawLand();
+  if (show.outline) drawOutline();
 
   if (sol && sol.ok) {
     if (show.cone) drawCone(sol);

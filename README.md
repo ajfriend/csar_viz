@@ -131,8 +131,11 @@ teec.destroy();
   lands.
 - `show` toggles the overlays: `cone` (surface, rulings, apex), `rim` (its
   cross-section on the sphere, the spherical ellipse), `axis` (the arrow
-  along b), `hull`, `sphere`, `land`, `gno`, `rays`. Points and the cone
-  problem are always drawn. For a slide that wants only the points and
+  along b), `hull` (the geodesic convex hull of the points), `outline`
+  (off by default: the points as a polygon in the order given, for a
+  non-convex input such as a star, where the hull is the wrong picture),
+  `sphere`, `land`, `gno`, `rays`. Points and the cone problem are always
+  drawn. For a slide that wants only the points and
   the ellipse: `show: { cone: false, axis: false, hull: false }`.
 - `interaction` is fixed at mount. `edit` covers dragging points,
   shift-click to add, and double-click to delete. `keys` is `true` for the
