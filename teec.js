@@ -155,9 +155,11 @@ const HOME = { ...frameAt(azel(HOME_AZ, HOME_EL)), dist: 4.0 };
 const MIN_DIST = 1.02, MAX_DIST = 14;
 const clampDist = d => Math.min(MAX_DIST, Math.max(MIN_DIST, d));
 // project()'s near plane: anything closer to the eye than this is dropped.
-// Below MIN_DIST − 1 so the nearest sphere point always projects; overlays
-// lifted off the sphere (the hull at R = 1.004) must stay under MIN_DIST too.
+// Half the eye's minimum height above the surface, so the nearest sphere
+// point always projects; the one overlay lifted off the sphere (the hull)
+// lifts by HULL_LIFT of the eye's height, far inside that.
 const NEAR = (MIN_DIST - 1) / 2;
+const HULL_LIFT = 0.004 / 3;   // 1.004 at the home view's dist 4, as before
 // Perspective: focal length as a multiple of the view's shorter side. Shared
 // by resize() and fitDist() so a fit is a fraction of the view at any size.
 const FOCAL_K = 1.15;
@@ -543,7 +545,13 @@ function hullOnSphere(S) {
 function drawHull(S) {
   const h = hullOnSphere(S);
   if (!h) return;
-  const R = 1.004;                       // lift clear of the sphere wireframe
+  // Lift clear of the sphere wireframe, by a fixed FRACTION of the eye's
+  // height above the surface: perspective magnifies a lift of h at a camera
+  // dist by ~h/(dist-1), so a fixed lift that is invisible from the home
+  // view (0.004 at dist 4) is a 20% enlargement at MIN_DIST, with the hull's
+  // corners visibly off the points they are meant to join. At any dist this
+  // is a constant 0.13%, and always under NEAR.
+  const R = 1 + HULL_LIFT * (cam.dist - 1);
   const c = nz(h.reduce((a, v) => add(a, v), V(0, 0, 0)));
   const ang = (u, v) => Math.acos(Math.max(-1, Math.min(1, dot(u, v))));
 
