@@ -136,8 +136,9 @@ teec.destroy();
   along b), `hull` (the geodesic convex hull of the points), `outline`
   (off by default: the points as a polygon in the order given, for a
   non-convex input such as a star, where the hull is the wrong picture),
-  `sphere`, `land`, `gno`, `rays`. Points and the cone problem are always
-  drawn. For a slide that wants only the points and
+  `sphere`, `land`, `gno`, `rays`, `points` (the input points as dots; off
+  for a slide that wants only the shape and its ellipse). The cone problem
+  is always drawn. For a slide that wants only the points and
   the ellipse: `show: { cone: false, axis: false, hull: false }`.
 - `interaction` is fixed at mount. `edit` covers dragging points,
   shift-click to add, and double-click to delete. `keys` is `true` for the

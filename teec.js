@@ -262,7 +262,7 @@ export function load() {
 export function mount(canvas, opts = {}) {
 const cv = canvas, ctx = cv.getContext('2d');
 const show = { sphere: true, land: false, gno: false, rays: false, hull: true,
-               cone: true, rim: true, axis: true, outline: false, ...opts.show };
+               cone: true, rim: true, axis: true, outline: false, points: true, ...opts.show };
 const { drag = true, zoom = true, keys = true, edit = true } = opts.interaction ?? {};
 const ac = new AbortController(), signal = ac.signal;   // every listener detaches on destroy()
 const cam = { ...HOME };
@@ -710,7 +710,7 @@ function draw() {
       pushLine(V(0,0,0), scl(x, 1 / Math.max(dot(sol.b, x), 1e-6)), 'rgba(90,104,128,0.28)', 1);
   }
 
-  for (let i = 0; i < X.length; i++) {
+  for (let i = 0; show.points && i < X.length; i++) {
     const x = X[i];
     const act = sol && sol.ok && onBoundary(sol, x);
     pushDot(x, act ? 6.2 : 5.0, act ? '#c2620a' : '#8a94a6', '#ffffff', 1.6);
