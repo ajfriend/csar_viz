@@ -183,6 +183,7 @@ const fitDist = (sol, fit) => {
    points, no solution yet) is left alone; see needsSolution. */
 export function viewFrame(spec, X = [], base = HOME, sol = null) {
   if (!spec || spec === 'home') return { ...HOME };
+  if (spec.frame) return { ...spec.frame };          // a camera copy, verbatim
   const v = { ...base };
   const at = spec.center === 'axis'   ? (sol?.ok ? sol.b : null)
            : spec.center === 'points' ? (X.length ? centroid(X) : null)
@@ -266,6 +267,12 @@ const { drag = true, zoom = true, keys = true, edit = true } = opts.interaction 
 const ac = new AbortController(), signal = ac.signal;   // every listener detaches on destroy()
 const cam = { ...HOME };
 /* =======================  scene state  ======================= */
+// The camera as a plain copy, the shape setView({ frame }) takes back: so a
+// host can mirror one diagram's camera onto another (synced pairs).
+const camCopy = () => ({ right: { ...cam.right }, up: { ...cam.up }, back: { ...cam.back }, dist: cam.dist });
+// After a USER camera change (drag, wheel, pinch, keys): tell the host.
+// setView does not fire it, so a host mirroring cameras cannot loop.
+const viewChanged = () => opts.onView?.(camCopy());
 function rotateCam(axis, t) {
   // Rotate two axes and rebuild the third: re-orthonormalizing every time
   // keeps float drift from skewing the frame over a long session.
@@ -274,6 +281,7 @@ function rotateCam(axis, t) {
   cam.right = nz(sub(r, scl(cam.back, dot(r, cam.back))));
   cam.up = cross(cam.back, cam.right);
   schedule('draw');
+  viewChanged();
 }
 const spin = t => rotateCam(cam.up, t);      // about the screen vertical
 const tilt = t => rotateCam(cam.right, t);   // about the screen horizontal
@@ -281,6 +289,7 @@ const roll = t => rotateCam(cam.back, t);    // about the view axis
 const setDist = d => {
   cam.dist = clampDist(d);
   schedule('draw');
+  viewChanged();
 };
 let X = [], sol = null, W = 0, H = 0, dpr = 1, focal = 1, solverReady = false;
 
@@ -858,6 +867,7 @@ return {
   get points() { return X.map(p => ({ ...p })); },
   get solution() { return sol; },
   get show() { return { ...show }; },
+  get view() { return camCopy(); },
   setPoints(pts) { X = pts.map(toXyz); recompute(); },
   /** 'home', or { center | az/el, roll, dist } applied over the current view; see viewFrame. */
   setView(spec) { applyView(spec); schedule('draw'); },

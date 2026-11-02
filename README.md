@@ -104,13 +104,15 @@ const teec = mount(canvas, {
   show: { cone: true, rim: true, axis: true, hull: true, sphere: true, gno: false, rays: false, land: false },
   interaction: { drag: true, zoom: true, keys: true, edit: true },   // fixed at mount
   onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, sol.halfAngle, ...
+  onView: view => {},                 // after a USER camera change (drag, wheel, keys); not after setView
   onKey: e => {},                     // keys the diagram does not use
 });
 await teec.ready;                     // the solver is loaded and the first solve drawn
 teec.setPoints(preset('quad'));
 teec.setView({ dist: 3 });            // applied over the current view; 'home' resets
 teec.setShow({ gno: true });
-teec.points; teec.solution; teec.show;   // copies of the current state
+teec.points; teec.solution; teec.show; teec.view;   // copies of the current state
+other.setView({ frame: teec.view });     // mirror one camera onto another diagram (synced pairs)
 teec.destroy();
 ```
 
