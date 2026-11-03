@@ -489,24 +489,22 @@ function drawRim(S) {
 }
 
 // The cross-section's two axes, as double-headed arrows through the rim's
-// centre on the sphere: the long one and the short one, whose ratio is the
-// aspect ratio. H is diagonal in (f1, f2), so each axis meets the rim where
-// the plane bᵀx = 1 point b + f / sqrt(H_ff) projects to the sphere.
+// centre: the long one and the short one, whose ratio is the aspect ratio.
+// H is diagonal in (f1, f2), so each axis runs along f and subtends
+// ±atan(r) about b, r = 1/√H_ff being its semi-axis on the plane bᵀx = 1.
 function drawAxes(S) {
   const { b, H, f1, f2 } = S, ext = extent(S);
-  const col = 'rgba(31,26,102,0.95)', L = 0.035, cosA = Math.cos(0.5), sinA = Math.sin(0.5);
-  for (const [f, h] of [[f1, H.a], [f2, H.d]]) {
-    const q = nz(add(b, scl(f, 1 / Math.sqrt(h))));
-    const th = Math.acos(Math.max(-1, Math.min(1, dot(b, q))));
-    const t = nz(sub(q, scl(b, dot(b, q))));             // tangent at b, toward q
-    const arc = s => add(scl(b, Math.cos(s)), scl(t, Math.sin(s)));
-    const N = 24;
-    for (let k = -N; k < N; k++) pushLine(ext(arc(th * k / N)), ext(arc(th * (k + 1) / N)), col, 2.2);
-    for (const sgn of [1, -1]) {                         // a chevron at each end
-      const tip = ext(arc(sgn * th)), back = nz(sub(arc(sgn * (th - 0.02)), arc(sgn * th)));
-      const side = cross(tip, back);
-      for (const w of [1, -1])
-        pushLine(tip, add(tip, scl(add(scl(back, cosA), scl(side, w * sinA)), L)), col, 2.2);
+  const col = 'rgba(31,26,102,0.95)', ALONG = 0.031, ACROSS = 0.017;   // chevron barbs
+  const step = Math.max(0.012, 11 * cam.dist / focal);                   // ~11 px per segment, as the hull
+  for (const [f, r] of [[f1, 1 / Math.sqrt(H.a)], [f2, 1 / Math.sqrt(H.d)]]) {
+    const th = Math.atan(r), n = cross(b, f);        // n: the arc's normal, so the barbs stay in-surface
+    const arc = s => ext(add(scl(b, Math.cos(s)), scl(f, Math.sin(s))));
+    const K = Math.max(8, Math.ceil(2 * th / step)), pts = [];
+    for (let k = 0; k <= K; k++) pts.push(arc(th * (2 * k / K - 1)));
+    for (let k = 0; k < K; k++) pushLine(pts[k], pts[k + 1], col, 2.2);
+    for (const sgn of [1, -1]) {                                           // a chevron at each end
+      const tip = arc(sgn * th), back = nz(sub(arc(sgn * (th - 0.02)), tip));   // back along the drawn curve
+      for (const w of [1, -1]) pushLine(tip, add(add(tip, scl(back, ALONG)), scl(n, w * ACROSS)), col, 2.2);
     }
   }
 }
