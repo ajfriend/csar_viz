@@ -101,7 +101,7 @@ import { mount, preset } from 'https://ajfriend.com/csar_viz/teec.js';
 const teec = mount(canvas, {
   points: [[lng, lat], ...],          // degrees; or unit vectors as {x,y,z} / [x,y,z]
   view: { center: 'points', dist: 2.7 },
-  show: { cone: true, rim: true, axis: true, hull: true, sphere: true, gno: false, rays: false, land: false },
+  show: { cone: true, rim: true, axis: true, axes: false, hull: true, sphere: true, gno: false, rays: false, land: false },
   interaction: { drag: true, zoom: true, keys: true, edit: true },   // fixed at mount
   onSolve: (sol, points) => {},       // after every solve; sol.ok, sol.aspect, sol.b, sol.halfAngle, ...
   onView: view => {},                 // after a USER camera change (drag, wheel, keys); not after setView
@@ -133,7 +133,9 @@ teec.destroy();
   lands.
 - `show` toggles the overlays: `cone` (surface, rulings, apex), `rim` (its
   cross-section on the sphere, the spherical ellipse), `axis` (the arrow
-  along b), `hull` (the geodesic convex hull of the points), `outline`
+  along b), `axes` (off by default: the ellipse's long and short axes as
+  double-headed arrows through its centre, the two lengths whose ratio is
+  the aspect ratio), `hull` (the geodesic convex hull of the points), `outline`
   (off by default: the points as a polygon in the order given, for a
   non-convex input such as a star, where the hull is the wrong picture),
   `sphere`, `land`, `gno`, `rays`, `points` (the input points as dots; off
@@ -162,7 +164,7 @@ to the diagram (the page passes them through to the library):
 
     ?embed              hide the sidebar, hint, and back link; the canvas fills the page
     ?preset=strip       initial point set: strip | quad | cap | rand
-    ?show=gno,rays      overlay toggles, comma-separated: cone rim axis hull sphere land gno rays
+    ?show=gno,rays      overlay toggles, comma-separated: cone rim axis axes hull sphere land gno rays
                         (listed ones on, the rest off; omit to keep the defaults)
     ?dist=2.8           initial camera distance (default 4; smaller is a bigger globe)
 
