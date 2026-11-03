@@ -262,7 +262,7 @@ export function load() {
 export function mount(canvas, opts = {}) {
 const cv = canvas, ctx = cv.getContext('2d');
 const show = { sphere: true, land: false, gno: false, rays: false, hull: true,
-               cone: true, rim: true, axis: true, outline: false, points: true, ...opts.show };
+               cone: true, rim: true, axis: true, axes: false, outline: false, points: true, ...opts.show };
 const { drag = true, zoom = true, keys = true, edit = true } = opts.interaction ?? {};
 const ac = new AbortController(), signal = ac.signal;   // every listener detaches on destroy()
 const cam = { ...HOME };
@@ -488,6 +488,27 @@ function drawRim(S) {
     pushLine(ext(rim[k]), ext(rim[(k + 1) % rim.length]), col, 2.2);
 }
 
+// The cross-section's two axes, as double-headed arrows through the rim's
+// centre: the long one and the short one, whose ratio is the aspect ratio.
+// H is diagonal in (f1, f2), so each axis runs along f and subtends
+// ±atan(r) about b, r = 1/√H_ff being its semi-axis on the plane bᵀx = 1.
+function drawAxes(S) {
+  const { b, H, f1, f2 } = S, ext = extent(S);
+  const col = 'rgba(31,26,102,0.95)', ALONG = 0.031, ACROSS = 0.017;   // chevron barbs
+  const step = Math.max(0.012, 11 * cam.dist / focal);                   // ~11 px per segment, as the hull
+  for (const [f, r] of [[f1, 1 / Math.sqrt(H.a)], [f2, 1 / Math.sqrt(H.d)]]) {
+    const th = Math.atan(r), n = cross(b, f);        // n: the arc's normal, so the barbs stay in-surface
+    const arc = s => ext(add(scl(b, Math.cos(s)), scl(f, Math.sin(s))));
+    const K = Math.max(8, Math.ceil(2 * th / step)), pts = [];
+    for (let k = 0; k <= K; k++) pts.push(arc(th * (2 * k / K - 1)));
+    for (let k = 0; k < K; k++) pushLine(pts[k], pts[k + 1], col, 2.2);
+    for (const sgn of [1, -1]) {                                           // a chevron at each end
+      const tip = arc(sgn * th), back = nz(sub(arc(sgn * (th - 0.02)), tip));   // back along the drawn curve
+      for (const w of [1, -1]) pushLine(tip, add(add(tip, scl(back, ALONG)), scl(n, w * ACROSS)), col, 2.2);
+    }
+  }
+}
+
 // The axis b, as an arrow from the apex to the sphere.
 function drawAxis(S) {
   const tip = S.b;                                     // unit length: b is already normalised
@@ -704,6 +725,7 @@ function draw() {
     if (show.cone) drawCone(sol);
     if (show.rim) drawRim(sol);
     if (show.axis) drawAxis(sol);
+    if (show.axes) drawAxes(sol);
     if (show.hull) drawHull(sol);
     if (show.gno) drawGnomonic(sol);
     if (show.rays) for (const x of X)
