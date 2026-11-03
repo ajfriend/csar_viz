@@ -480,10 +480,13 @@ function drawCone(S) {
   pushDot(O, 3.0, '#5a6478', '#ffffff', 1);           // apex
 }
 
+// The rim's colour: teal on the sphere, orange on the gnomonic plane. The
+// ellipse's axes are drawn in it too, so they read as part of the ellipse.
+const rimCol = () => show.gno ? 'rgba(194,98,10,0.95)' : 'rgba(10,116,106,0.95)';
+
 // The cone's rim: its cross-section, the spherical ellipse through the support points.
 function drawRim(S) {
-  const { rim } = coneRim(S, 128), ext = extent(S);
-  const col = show.gno ? 'rgba(194,98,10,0.95)' : 'rgba(10,116,106,0.95)';
+  const { rim } = coneRim(S, 128), ext = extent(S), col = rimCol();
   for (let k = 0; k < rim.length; k++)
     pushLine(ext(rim[k]), ext(rim[(k + 1) % rim.length]), col, 2.2);
 }
@@ -494,7 +497,7 @@ function drawRim(S) {
 // ±atan(r) about b, r = 1/√H_ff being its semi-axis on the plane bᵀx = 1.
 function drawAxes(S) {
   const { b, H, f1, f2 } = S, ext = extent(S);
-  const col = 'rgba(31,26,102,0.95)', ALONG = 0.031, ACROSS = 0.017;   // chevron barbs
+  const col = rimCol(), ALONG = 0.031, ACROSS = 0.017;   // chevron barbs
   const step = Math.max(0.012, 11 * cam.dist / focal);                   // ~11 px per segment, as the hull
   for (const [f, r] of [[f1, 1 / Math.sqrt(H.a)], [f2, 1 / Math.sqrt(H.d)]]) {
     const th = Math.atan(r), n = cross(b, f);        // n: the arc's normal, so the barbs stay in-surface
